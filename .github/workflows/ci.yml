@@ -1,0 +1,82 @@
+name: NurCRM CI
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+
+jobs:
+  test-python:
+    name: Unit Tests (Python)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          if [ -f "backend/requirements.txt" ]; then
+            pip install -r backend/requirements.txt
+          elif [ -f "NurCRM-services /backend/requirements.txt" ]; then
+            pip install -r "NurCRM-services /backend/requirements.txt"
+          fi
+
+      - name: Run pytest
+        run: |
+          if [ -d "backend" ]; then
+            PYTHONPATH=backend:. pytest -v backend/tests/test_domain_and_use_cases.py
+          elif [ -d "NurCRM-services /backend" ]; then
+            cd "NurCRM-services " && PYTHONPATH=backend:. pytest -v backend/tests/test_domain_and_use_cases.py
+          fi
+
+  test-go:
+    name: Unit & Build Tests (Go)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+
+      - name: Test Availability Engine
+        run: |
+          TARGET_DIR="backend/services/public-gateway"
+          [ ! -d "$TARGET_DIR" ] && TARGET_DIR="NurCRM-services /backend/services/public-gateway"
+          cd "$TARGET_DIR" && go test -v ./...
+
+      - name: Compile Go Services
+        run: |
+          BASE_DIR="backend/services"
+          [ ! -d "$BASE_DIR" ] && BASE_DIR="NurCRM-services /backend/services"
+          echo "Building public-gateway..."
+          (cd "$BASE_DIR/public-gateway" && go build -o /dev/null ./cmd/main.go)
+          echo "Building scheduler-worker..."
+          (cd "$BASE_DIR/scheduler-worker" && go build -o /dev/null ./cmd/main.go)
+          echo "Building realtime-gateway..."
+          (cd "$BASE_DIR/realtime-gateway" && go build -o /dev/null ./cmd/main.go)
+
+  docker-compose-check:
+    name: Docker Compose Validation
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Validate Docker Compose Configuration
+        run: |
+          if [ -f "docker-compose.yml" ]; then
+            docker compose config > /dev/null
+          elif [ -f "NurCRM-services /docker-compose.yml" ]; then
+            cd "NurCRM-services " && docker compose config > /dev/null
+          fi
