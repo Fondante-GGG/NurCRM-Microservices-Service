@@ -1,0 +1,217 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: nurcrm
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres_master_password
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./init-db/01_init.sql:/docker-entrypoint-initdb.d/01_init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d nurcrm"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "${REDIS_PORT:-6381}:6379"
+    volumes:
+      - redisdata:/data
+
+  rabbitmq:
+    image: rabbitmq:3-management
+    ports:
+      - "${RABBITMQ_PORT:-5672}:5672"
+      - "${RABBITMQ_MGMT_PORT:-15672}:15672"
+    volumes:
+      - rabbitmqdata:/var/lib/rabbitmq
+
+  gateway:
+    image: nginx:alpine
+    ports:
+      - "${GATEWAY_PORT:-80}:80"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - client_media:/var/lib/crm/media/clients:ro
+    depends_on:
+      - auth-service
+      - catalog-service
+      - client-service
+      - schedule-service
+      - booking-service
+      - finance-service
+      - analytics-service
+      - notification-service
+      - public-gateway
+      - realtime-gateway
+      - admin-panel
+
+  auth-service:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.python
+    command: python -m gunicorn backend.services.auth.wsgi:application --bind 0.0.0.0:8001
+    environment:
+      DB_HOST: postgres
+      DB_USER: svc_auth
+      DB_PASSWORD: svc_auth_secret
+      DB_NAME: nurcrm
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  catalog-service:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.python
+    command: python -m gunicorn backend.services.catalog.wsgi:application --bind 0.0.0.0:8002
+    environment:
+      DB_HOST: postgres
+      DB_USER: svc_catalog
+      DB_PASSWORD: svc_catalog_secret
+      DB_NAME: nurcrm
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  client-service:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.python
+    command: python -m gunicorn backend.services.client.wsgi:application --bind 0.0.0.0:8003
+    environment:
+      DB_HOST: postgres
+      DB_USER: svc_clients
+      DB_PASSWORD: svc_clients_secret
+      DB_NAME: nurcrm
+    volumes:
+      - client_media:/var/lib/crm/media
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  schedule-service:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.python
+    command: python -m gunicorn backend.services.schedule.wsgi:application --bind 0.0.0.0:8004
+    environment:
+      DB_HOST: postgres
+      DB_USER: svc_schedule
+      DB_PASSWORD: svc_schedule_secret
+      DB_NAME: nurcrm
+      CATALOG_SERVICE_URL: http://catalog-service:8002
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  booking-service:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.python
+    command: python -m gunicorn backend.services.booking.wsgi:application --bind 0.0.0.0:8005
+    environment:
+      DB_HOST: postgres
+      DB_USER: svc_booking
+      DB_PASSWORD: svc_booking_secret
+      DB_NAME: nurcrm
+      CLIENT_SERVICE_URL: http://client-service:8003
+      SCHEDULE_SERVICE_URL: http://schedule-service:8004
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  finance-service:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.python
+    command: python -m gunicorn backend.services.finance.wsgi:application --bind 0.0.0.0:8006
+    environment:
+      DB_HOST: postgres
+      DB_USER: svc_finance
+      DB_PASSWORD: svc_finance_secret
+      DB_NAME: nurcrm
+      CATALOG_SERVICE_URL: http://catalog-service:8002
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  analytics-service:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.python
+    command: uvicorn backend.services.analytics.interface.main:app --host 0.0.0.0 --port 8007
+    environment:
+      DB_HOST: postgres
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  notification-service:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.python
+    command: uvicorn backend.services.notification.interface.main:app --host 0.0.0.0 --port 8008
+    depends_on:
+      - redis
+      - rabbitmq
+
+  admin-panel:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.python
+    command: python -m gunicorn backend.services.admin_panel.wsgi:application --bind 0.0.0.0:8000
+    environment:
+      DB_HOST: postgres
+      DB_NAME: nurcrm
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  public-gateway:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.public-gateway
+    environment:
+      PORT: "8010"
+      REDIS_ADDR: redis:6379
+      AUTH_SERVICE_URL: http://auth-service:8001
+      CATALOG_SERVICE_URL: http://catalog-service:8002
+      SCHEDULE_SERVICE_URL: http://schedule-service:8004
+      BOOKING_SERVICE_URL: http://booking-service:8005
+    depends_on:
+      - redis
+
+  scheduler-worker:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.scheduler-worker
+    environment:
+      DATABASE_URL: postgres://svc_schedule:svc_schedule_secret@postgres:5432/nurcrm?sslmode=disable&search_path=schedule,public
+      SCHEDULE_SERVICE_URL: http://schedule-service:8004
+      INTERVAL_SECONDS: "60"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  realtime-gateway:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.realtime-gateway
+    environment:
+      PORT: "8020"
+      JWKS_URL: http://auth-service:8001/.well-known/jwks.json
+      REDIS_ADDR: redis:6379
+    depends_on:
+      - redis
+
+volumes:
+  pgdata:
+  redisdata:
+  rabbitmqdata:
+  client_media:

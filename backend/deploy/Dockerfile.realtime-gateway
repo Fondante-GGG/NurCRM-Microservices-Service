@@ -1,0 +1,16 @@
+FROM golang:1.22-alpine AS builder
+
+WORKDIR /app
+
+COPY libs/go_common ./libs/go_common
+COPY services/realtime-gateway ./services/realtime-gateway
+
+WORKDIR /app/services/realtime-gateway
+RUN go mod tidy
+RUN CGO_ENABLED=0 GOOS=linux go build -o /app/realtime-gateway ./cmd/main.go
+
+FROM alpine:3.19
+WORKDIR /app
+COPY --from=builder /app/realtime-gateway .
+EXPOSE 8020
+CMD ["./realtime-gateway"]

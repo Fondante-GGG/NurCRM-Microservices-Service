@@ -1,0 +1,14 @@
+# Binaries & Build artifacts
+bin/
+dist/
+*.exe
+*.dll
+*.so
+*.dylib
+*.out
+*.test
+
+# Secrets & Local Environment
+.env
+.env.local
+*.log

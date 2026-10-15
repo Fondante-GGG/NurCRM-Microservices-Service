@@ -1,0 +1,29 @@
+# Byte-compiled / optimized
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual Environment
+.venv/
+env/
+venv/
+
+# Secrets
+.env
+.env.local
+*.pem
+*.key
+
+# Media files
+media/
+*.log
+
+# Pytest
+.pytest_cache/
+
+# Go artifacts
+*.out
+*.test
+bin/
+dist/
+*.exe
