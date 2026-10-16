@@ -148,6 +148,10 @@ services:
     command: uvicorn backend.services.analytics.interface.main:app --host 0.0.0.0 --port 8007
     environment:
       DB_HOST: postgres
+      DB_USER: svc_analytics
+      DB_PASSWORD: svc_analytics_secret
+      DB_NAME: nurcrm
+      DB_PORT: 5432
     depends_on:
       postgres:
         condition: service_healthy
@@ -157,9 +161,19 @@ services:
       context: ..
       dockerfile: deploy/Dockerfile.python
     command: uvicorn backend.services.notification.interface.main:app --host 0.0.0.0 --port 8008
+    environment:
+      DB_HOST: postgres
+      DB_USER: svc_notify
+      DB_PASSWORD: svc_notify_secret
+      DB_NAME: nurcrm
+      DB_PORT: 5432
     depends_on:
-      - redis
-      - rabbitmq
+      redis:
+        condition: service_started
+      rabbitmq:
+        condition: service_started
+      postgres:
+        condition: service_healthy
 
   admin-panel:
     build:

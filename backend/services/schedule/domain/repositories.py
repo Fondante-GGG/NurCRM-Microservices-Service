@@ -8,6 +8,9 @@ class AppointmentRepository(Protocol):
     def get_by_id(self, company_id: uuid.UUID, appt_id: uuid.UUID) -> Optional[Appointment]:
         ...
 
+    def get_by_idempotency_key(self, company_id: uuid.UUID, idempotency_key: str) -> Optional[Appointment]:
+        ...
+
     def list_by_company(
         self,
         company_id: uuid.UUID,

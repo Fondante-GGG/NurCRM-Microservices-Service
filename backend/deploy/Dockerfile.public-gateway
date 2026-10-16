@@ -4,6 +4,7 @@ WORKDIR /app
 
 COPY libs/go_common ./libs/go_common
 COPY services/public-gateway ./services/public-gateway
+COPY keys ./keys
 
 WORKDIR /app/services/public-gateway
 RUN go mod tidy
@@ -12,5 +13,6 @@ RUN CGO_ENABLED=0 GOOS=linux go build -o /app/public-gateway ./cmd/main.go
 FROM alpine:3.19
 WORKDIR /app
 COPY --from=builder /app/public-gateway .
+COPY keys ./keys
 EXPOSE 8010
 CMD ["./public-gateway"]

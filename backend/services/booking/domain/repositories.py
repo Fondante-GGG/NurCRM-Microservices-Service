@@ -4,7 +4,7 @@ from backend.services.booking.domain.models import BookingRequest
 
 
 class BookingRequestRepository(Protocol):
-    def get_by_id(self, company_id: uuid.UUID, booking_id: uuid.UUID) -> Optional[BookingRequest]:
+    def get_by_id(self, company_id: uuid.UUID, booking_id: uuid.UUID, for_update: bool = False) -> Optional[BookingRequest]:
         ...
 
     def list_by_company(self, company_id: uuid.UUID, status: Optional[str] = None) -> List[BookingRequest]:

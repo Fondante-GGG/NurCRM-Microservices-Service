@@ -60,6 +60,7 @@ class Appointment(AggregateRoot):
     discount: Money = field(default_factory=lambda: Money(Decimal("0.00")))
     status: str = AppointmentStatus.BOOKED
     comment: str = ""
+    idempotency_key: Optional[str] = None
     created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
@@ -79,6 +80,7 @@ class Appointment(AggregateRoot):
         discount: Optional[Money] = None,
         comment: str = "",
         status: str = AppointmentStatus.BOOKED,
+        idempotency_key: Optional[str] = None,
     ) -> Appointment:
         if not services:
             raise ValidationError("Appointment must have at least one service")
@@ -103,6 +105,7 @@ class Appointment(AggregateRoot):
             discount=disc,
             status=status,
             comment=comment,
+            idempotency_key=idempotency_key,
         )
 
     def transition_status(self, new_status: str) -> None:

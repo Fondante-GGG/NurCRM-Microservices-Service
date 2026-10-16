@@ -17,7 +17,20 @@ import (
 
 var upgrader = websocket.Upgrader{
 	CheckOrigin: func(r *http.Request) bool {
-		return true // Allow all CORS in dev
+		origin := r.Header.Get("Origin")
+		if origin == "" {
+			return true
+		}
+		allowed := os.Getenv("ALLOWED_ORIGINS")
+		if allowed == "" || allowed == "*" {
+			return strings.Contains(origin, "localhost") || strings.Contains(origin, "127.0.0.1") || strings.Contains(origin, "nurcrm")
+		}
+		for _, o := range strings.Split(allowed, ",") {
+			if strings.TrimSpace(o) == origin {
+				return true
+			}
+		}
+		return false
 	},
 }
 
@@ -29,6 +42,8 @@ type Client struct {
 	permissions []string
 	sid         string
 	sendChan    chan []byte
+	closed      bool
+	mu          sync.Mutex
 }
 
 func (c *Client) hasPermission(perm string) bool {
@@ -41,6 +56,28 @@ func (c *Client) hasPermission(perm string) bool {
 		}
 	}
 	return false
+}
+
+func (c *Client) send(msg []byte) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.closed {
+		return
+	}
+	select {
+	case c.sendChan <- msg:
+	default:
+		// Channel buffer full
+	}
+}
+
+func (c *Client) closeChan() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if !c.closed {
+		c.closed = true
+		close(c.sendChan)
+	}
 }
 
 type RealtimeServer struct {
@@ -77,7 +114,7 @@ func (s *RealtimeServer) unregister(c *Client) {
 			delete(s.rooms, c.companyID)
 		}
 	}
-	close(c.sendChan)
+	c.closeChan()
 	log.Printf("User %s disconnected from company room %s", c.userID, c.companyID)
 }
 
@@ -100,12 +137,17 @@ func (s *RealtimeServer) BroadcastToCompany(companyID string, eventData map[stri
 		return
 	}
 
+	s.mu.RLock()
+	targetClients := make([]*Client, 0, len(clients))
 	for client := range clients {
-		// Rule 1: Do not re-render own immediate actions if client handles optimistic UI
+		targetClients = append(targetClients, client)
+	}
+	s.mu.RUnlock()
+
+	for _, client := range targetClients {
 		_ = actorID
 
-		// Rule 2: RBAC Filtering
-		// Masters only receive their own appointments
+		// RBAC Filtering: Masters only receive their own appointments
 		if client.role == "master" && barberID != "" && barberID != client.userID {
 			continue
 		}
@@ -117,11 +159,7 @@ func (s *RealtimeServer) BroadcastToCompany(companyID string, eventData map[stri
 			}
 		}
 
-		select {
-		case client.sendChan <- msgBytes:
-		default:
-			// Buffer full, drop or disconnect slow client
-		}
+		client.send(msgBytes)
 	}
 }
 
@@ -169,14 +207,21 @@ func (s *RealtimeServer) handleWS(w http.ResponseWriter, r *http.Request) {
 
 	if token != "" {
 		claims, err = s.validator.ValidateToken(token)
+		if err != nil || claims == nil {
+			conn.WriteJSON(map[string]string{"error": "Unauthorized: invalid or expired token"})
+			conn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(4001, "Unauthorized"))
+			conn.Close()
+			return
+		}
 	}
 
 	if claims == nil {
 		// Wait for first message containing {"type": "auth", "token": "..."}
-		conn.SetReadDeadline(time.Now().Add(10 * time.Second))
+		conn.SetReadDeadline(time.Now().Add(5 * time.Second))
 		_, msg, err := conn.ReadMessage()
 		if err != nil {
 			conn.WriteJSON(map[string]string{"error": "Authentication timeout"})
+			conn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(4008, "Auth timeout"))
 			conn.Close()
 			return
 		}
@@ -186,17 +231,16 @@ func (s *RealtimeServer) handleWS(w http.ResponseWriter, r *http.Request) {
 		}
 		if err := json.Unmarshal(msg, &authMsg); err != nil || authMsg.Token == "" {
 			conn.WriteJSON(map[string]string{"error": "Invalid auth message"})
+			conn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(4001, "Invalid auth"))
 			conn.Close()
 			return
 		}
 		claims, err = s.validator.ValidateToken(authMsg.Token)
-		if err != nil {
-			// In local dev/testing without active JWKS server, accept mock claims
-			claims = &jwks.Claims{
-				CompanyID:   "00000000-0000-0000-0000-000000000001",
-				Role:        "admin",
-				Permissions: []string{"can_view_barber_records"},
-			}
+		if err != nil || claims == nil {
+			conn.WriteJSON(map[string]string{"error": "Unauthorized: invalid or expired token"})
+			conn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(4001, "Unauthorized"))
+			conn.Close()
+			return
 		}
 	}
 
@@ -239,7 +283,7 @@ func (s *RealtimeServer) handleWS(w http.ResponseWriter, r *http.Request) {
 		}
 		if err := json.Unmarshal(msg, &action); err == nil {
 			if action.Action == "acquire_lock" {
-				// Broadcast soft-lock hint: "User is editing this entity"
+				// Broadcast soft-lock hint using verified client.userID and client.companyID
 				s.BroadcastToCompany(client.companyID, map[string]interface{}{
 					"type":      "edit.lock.acquired",
 					"entity":    action.Entity,
@@ -252,6 +296,25 @@ func (s *RealtimeServer) handleWS(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *RealtimeServer) handleSSE(w http.ResponseWriter, r *http.Request) {
+	token := r.URL.Query().Get("token")
+	if token == "" {
+		authHeader := r.Header.Get("Authorization")
+		if strings.HasPrefix(authHeader, "Bearer ") {
+			token = strings.TrimPrefix(authHeader, "Bearer ")
+		}
+	}
+
+	if token == "" {
+		http.Error(w, `{"code":"unauthorized","message":"Token required for SSE"}`, http.StatusUnauthorized)
+		return
+	}
+
+	claims, err := s.validator.ValidateToken(token)
+	if err != nil || claims == nil {
+		http.Error(w, `{"code":"unauthorized","message":"Invalid or expired token"}`, http.StatusUnauthorized)
+		return
+	}
+
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
@@ -263,8 +326,33 @@ func (s *RealtimeServer) handleSSE(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	fmt.Fprintf(w, "event: connected\ndata: {\"status\":\"connected\"}\n\n")
+	client := &Client{
+		conn:        nil,
+		companyID:   claims.CompanyID,
+		userID:      claims.Subject,
+		role:        claims.Role,
+		permissions: claims.Permissions,
+		sid:         claims.SID,
+		sendChan:    make(chan []byte, 256),
+	}
+
+	s.register(client)
+	defer s.unregister(client)
+
+	fmt.Fprintf(w, "event: connected\ndata: {\"status\":\"connected\",\"user_id\":\"%s\",\"company_id\":\"%s\"}\n\n", claims.Subject, claims.CompanyID)
 	flusher.Flush()
 
-	<-r.Context().Done()
+	notify := r.Context().Done()
+	for {
+		select {
+		case <-notify:
+			return
+		case msg, ok := <-client.sendChan:
+			if !ok {
+				return
+			}
+			fmt.Fprintf(w, "data: %s\n\n", string(msg))
+			flusher.Flush()
+		}
+	}
 }

@@ -141,6 +141,7 @@ def create_access_token(
 ) -> str:
     now = int(time.time())
     payload = {
+        "iss": "nurcrm-auth",
         "sub": str(user_id),
         "company_id": str(company_id),
         "role": role,
@@ -148,6 +149,7 @@ def create_access_token(
         "sid": sid or str(uuid.uuid4()),
         "email": email or "",
         "impersonated_by": impersonated_by,
+        "type": "access",
         "iat": now,
         "exp": now + (expires_in_minutes * 60),
     }
@@ -167,6 +169,7 @@ def create_refresh_token(
 ) -> str:
     now = int(time.time())
     payload = {
+        "iss": "nurcrm-auth",
         "sub": str(user_id),
         "company_id": str(company_id),
         "sid": sid,
@@ -188,12 +191,42 @@ def verify_token(token: str) -> JWTUser:
             token,
             KeyManager.get_public_key(),
             algorithms=["RS256"],
-            options={"verify_exp": True},
+            options={"verify_exp": True, "verify_signature": True},
         )
     except jwt.ExpiredSignatureError:
         raise UnauthorizedError("Token has expired")
     except Exception as e:
         raise UnauthorizedError(f"Invalid token: {str(e)}")
+
+    if payload.get("type") == "refresh":
+        raise UnauthorizedError("Invalid token type: cannot use refresh token as access token")
+
+    return JWTUser(
+        user_id=payload.get("sub", ""),
+        company_id=payload.get("company_id", ""),
+        role=payload.get("role", "master"),
+        permissions=payload.get("permissions", []),
+        sid=payload.get("sid"),
+        email=payload.get("email"),
+        impersonated_by=payload.get("impersonated_by"),
+    )
+
+
+def verify_refresh_token(token: str) -> JWTUser:
+    try:
+        payload = jwt.decode(
+            token,
+            KeyManager.get_public_key(),
+            algorithms=["RS256"],
+            options={"verify_exp": True, "verify_signature": True},
+        )
+    except jwt.ExpiredSignatureError:
+        raise UnauthorizedError("Refresh token has expired")
+    except Exception as e:
+        raise UnauthorizedError(f"Invalid refresh token: {str(e)}")
+
+    if payload.get("type") != "refresh":
+        raise UnauthorizedError("Invalid token type: expected refresh token")
 
     return JWTUser(
         user_id=payload.get("sub", ""),
@@ -209,6 +242,7 @@ def verify_token(token: str) -> JWTUser:
 def create_internal_token(sender_service: str, target_service: str, expires_in_minutes: int = 5) -> str:
     now = int(time.time())
     payload = {
+        "iss": "nurcrm-mesh",
         "sub": sender_service,
         "aud": target_service,
         "type": "internal",
@@ -225,13 +259,42 @@ def create_internal_token(sender_service: str, target_service: str, expires_in_m
 
 def verify_internal_token(token: str, expected_audience: str) -> Dict[str, Any]:
     try:
+        # Decode without audience first to check if target or 'all' is accepted
+        unverified = jwt.decode(token, options={"verify_signature": False})
+        aud = unverified.get("aud")
+        acceptable_aud = [expected_audience, "all", "*"]
+        if aud not in acceptable_aud:
+            raise UnauthorizedError(f"Invalid audience: expected {expected_audience}, got {aud}")
+
         payload = jwt.decode(
             token,
             KeyManager.get_public_key(),
             algorithms=["RS256"],
-            audience=expected_audience,
-            options={"verify_exp": True},
+            audience=aud,
+            options={"verify_exp": True, "verify_signature": True},
         )
+        if payload.get("type") != "internal":
+            raise UnauthorizedError("Token is not an internal service token")
         return payload
+    except UnauthorizedError:
+        raise
     except Exception as e:
         raise UnauthorizedError(f"Invalid internal token: {str(e)}")
+
+
+def verify_internal_service_request(request, expected_service: str) -> Dict[str, Any]:
+    # Support both DRF request and FastAPI/Starlette request
+    headers = getattr(request, "headers", None)
+    if headers is None and hasattr(request, "META"):
+        auth_header = request.META.get("HTTP_AUTHORIZATION", "")
+    elif headers:
+        auth_header = headers.get("Authorization", "")
+    else:
+        auth_header = ""
+
+    if not auth_header or not auth_header.startswith("Bearer "):
+        raise UnauthorizedError("Missing or malformed internal service Bearer token")
+
+    token = auth_header.split(" ", 1)[1].strip()
+    return verify_internal_token(token, expected_audience=expected_service)
+

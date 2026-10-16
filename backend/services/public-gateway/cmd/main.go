@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -13,17 +14,18 @@ import (
 	"strings"
 	"time"
 
+	"github.com/nurcrm/backend/libs/go_common/jwks"
 	"github.com/nurcrm/backend/libs/go_common/redis"
 	"github.com/nurcrm/backend/services/public-gateway/internal/availability"
 )
 
 type GatewayConfig struct {
-	Port              string
-	RedisAddr         string
-	AuthServiceURL    string
-	CatalogServiceURL string
+	Port               string
+	RedisAddr          string
+	AuthServiceURL     string
+	CatalogServiceURL  string
 	ScheduleServiceURL string
-	BookingServiceURL string
+	BookingServiceURL  string
 }
 
 func getEnv(key, defaultVal string) string {
@@ -33,10 +35,21 @@ func getEnv(key, defaultVal string) string {
 	return defaultVal
 }
 
+type CompanyInfo struct {
+	ID                   string `json:"id"`
+	Name                 string `json:"name"`
+	Slug                 string `json:"slug"`
+	AppointmentWorkStart string `json:"appointment_work_start"`
+	AppointmentWorkEnd   string `json:"appointment_work_end"`
+	SubscriptionPlan     string `json:"subscription_plan"`
+}
+
 type PublicGateway struct {
-	cfg    GatewayConfig
-	redis  *redis.Client
-	engine *availability.AvailabilityEngine
+	cfg     GatewayConfig
+	redis   *redis.Client
+	engine  *availability.AvailabilityEngine
+	privKey []byte
+	client  *http.Client
 }
 
 func main() {
@@ -49,11 +62,18 @@ func main() {
 		BookingServiceURL:  getEnv("BOOKING_SERVICE_URL", "http://localhost:8005"),
 	}
 
+	privKey, err := jwks.LoadPrivateKey("")
+	if err != nil {
+		log.Printf("Warning: could not load private key at startup: %v", err)
+	}
+
 	rClient := redis.NewClient(cfg.RedisAddr, "", 0)
 	gw := &PublicGateway{
-		cfg:    cfg,
-		redis:  rClient,
-		engine: availability.NewAvailabilityEngine(30),
+		cfg:     cfg,
+		redis:   rClient,
+		engine:  availability.NewAvailabilityEngine(30),
+		privKey: privKey,
+		client:  &http.Client{Timeout: 5 * time.Second},
 	}
 
 	mux := http.NewServeMux()
@@ -78,13 +98,78 @@ func withCORS(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, Idempotency-Key, X-Idempotency-Key")
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusOK)
 			return
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+func (gw *PublicGateway) getInternalToken(targetService string) (string, error) {
+	if len(gw.privKey) == 0 {
+		var err error
+		gw.privKey, err = jwks.LoadPrivateKey("")
+		if err != nil {
+			return "", fmt.Errorf("failed to load private key: %w", err)
+		}
+	}
+	return jwks.CreateInternalToken("public-gateway", targetService, gw.privKey)
+}
+
+func (gw *PublicGateway) doInternalRequest(ctx context.Context, targetService, method, url string, body io.Reader, extraHeaders map[string]string) (*http.Response, error) {
+	req, err := http.NewRequestWithContext(ctx, method, url, body)
+	if err != nil {
+		return nil, err
+	}
+	token, err := gw.getInternalToken(targetService)
+	if err == nil && token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	for k, v := range extraHeaders {
+		req.Header.Set(k, v)
+	}
+	return gw.client.Do(req)
+}
+
+func (gw *PublicGateway) getCompanyBySlug(ctx context.Context, slug string) (*CompanyInfo, int, error) {
+	// Try Redis cache
+	cacheKey := fmt.Sprintf("pub:%s:company", slug)
+	cachedBytes, err := gw.redis.Raw().Get(ctx, cacheKey).Bytes()
+	if err == nil && len(cachedBytes) > 0 {
+		var comp CompanyInfo
+		if err := json.Unmarshal(cachedBytes, &comp); err == nil && comp.ID != "" {
+			return &comp, http.StatusOK, nil
+		}
+	}
+
+	url := fmt.Sprintf("%s/internal/v1/companies/slug/%s/", gw.cfg.AuthServiceURL, slug)
+	resp, err := gw.doInternalRequest(ctx, "auth-service", http.MethodGet, url, nil, nil)
+	if err != nil {
+		log.Printf("Error contacting auth-service for slug %s: %v", slug, err)
+		return nil, http.StatusBadGateway, fmt.Errorf("auth service unavailable: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusNotFound {
+		return nil, http.StatusNotFound, errors.New("company not found")
+	}
+	if resp.StatusCode >= 400 {
+		return nil, resp.StatusCode, fmt.Errorf("auth service returned status %d", resp.StatusCode)
+	}
+
+	var comp CompanyInfo
+	if err := json.NewDecoder(resp.Body).Decode(&comp); err != nil {
+		return nil, http.StatusBadGateway, fmt.Errorf("invalid response from auth service: %w", err)
+	}
+
+	// Cache valid company in Redis for 5 minutes
+	data, _ := json.Marshal(comp)
+	_ = gw.redis.Raw().Set(ctx, cacheKey, data, 5*time.Minute).Err()
+
+	return &comp, http.StatusOK, nil
 }
 
 func (gw *PublicGateway) handlePublicRoutes(w http.ResponseWriter, r *http.Request) {
@@ -124,19 +209,45 @@ func (gw *PublicGateway) handlePublicRoutes(w http.ResponseWriter, r *http.Reque
 }
 
 func (gw *PublicGateway) handleServiceCategories(w http.ResponseWriter, r *http.Request, slug string) {
-	// Sample mock / proxy categories
-	res := []map[string]interface{}{
-		{"id": "11111111-1111-1111-1111-111111111111", "name": "Волосы", "is_active": true},
-		{"id": "22222222-2222-2222-2222-222222222222", "name": "Борода и бритье", "is_active": true},
-		{"id": "33333333-3333-3333-3333-333333333333", "name": "SPA и Массаж", "is_active": true},
+	ctx, cancel := context.WithTimeout(r.Context(), 4*time.Second)
+	defer cancel()
+
+	comp, status, err := gw.getCompanyBySlug(ctx, slug)
+	if err != nil {
+		if status == http.StatusNotFound {
+			http.Error(w, `{"code":"not_found","message":"Company not found"}`, http.StatusNotFound)
+			return
+		}
+		http.Error(w, `{"code":"bad_gateway","message":"Failed to resolve company"}`, http.StatusBadGateway)
+		return
 	}
-	json.NewEncoder(w).Encode(res)
+
+	url := fmt.Sprintf("%s/internal/v1/categories/?company_id=%s", gw.cfg.CatalogServiceURL, comp.ID)
+	resp, err := gw.doInternalRequest(ctx, "catalog-service", http.MethodGet, url, nil, nil)
+	if err != nil {
+		log.Printf("Error contacting catalog-service for categories: %v", err)
+		http.Error(w, `{"code":"bad_gateway","message":"Catalog service unavailable"}`, http.StatusBadGateway)
+		return
+	}
+	defer resp.Body.Close()
+
+	w.WriteHeader(resp.StatusCode)
+	io.Copy(w, resp.Body)
 }
 
 func (gw *PublicGateway) handleServices(w http.ResponseWriter, r *http.Request, slug string) {
-	// Try Redis cache
-	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	ctx, cancel := context.WithTimeout(r.Context(), 4*time.Second)
 	defer cancel()
+
+	comp, status, err := gw.getCompanyBySlug(ctx, slug)
+	if err != nil {
+		if status == http.StatusNotFound {
+			http.Error(w, `{"code":"not_found","message":"Company not found"}`, http.StatusNotFound)
+			return
+		}
+		http.Error(w, `{"code":"bad_gateway","message":"Failed to resolve company"}`, http.StatusBadGateway)
+		return
+	}
 
 	cached, err := gw.redis.GetPublicServices(ctx, slug)
 	if err == nil && len(cached) > 0 {
@@ -144,56 +255,85 @@ func (gw *PublicGateway) handleServices(w http.ResponseWriter, r *http.Request, 
 		return
 	}
 
-	// Fallback response
-	services := []map[string]interface{}{
-		{
-			"id":           "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
-			"name":         "Стрижка классическая",
-			"price":        "800.00",
-			"time_minutes": 30,
-			"is_active":    true,
-		},
-		{
-			"id":           "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
-			"name":         "Моделирование бороды",
-			"price":        "600.00",
-			"time_minutes": 30,
-			"is_active":    true,
-		},
-		{
-			"id":           "cccccccc-cccc-cccc-cccc-cccccccccccc",
-			"name":         "Комплекс (Стрижка + Борода)",
-			"price":        "1200.00",
-			"time_minutes": 60,
-			"is_active":    true,
-		},
+	url := fmt.Sprintf("%s/internal/v1/services/?company_id=%s", gw.cfg.CatalogServiceURL, comp.ID)
+	resp, err := gw.doInternalRequest(ctx, "catalog-service", http.MethodGet, url, nil, nil)
+	if err != nil {
+		log.Printf("Error contacting catalog-service for services: %v", err)
+		http.Error(w, `{"code":"bad_gateway","message":"Catalog service unavailable"}`, http.StatusBadGateway)
+		return
 	}
-	data, _ := json.Marshal(services)
-	gw.redis.SetPublicServices(ctx, slug, data, 300*time.Second)
-	w.Write(data)
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusOK {
+		data, err := io.ReadAll(resp.Body)
+		if err == nil {
+			_ = gw.redis.SetPublicServices(ctx, slug, data, 300*time.Second)
+			w.WriteHeader(http.StatusOK)
+			w.Write(data)
+			return
+		}
+	}
+
+	w.WriteHeader(resp.StatusCode)
+	io.Copy(w, resp.Body)
 }
 
 func (gw *PublicGateway) handleMasters(w http.ResponseWriter, r *http.Request, slug string) {
-	masters := []map[string]interface{}{
-		{
-			"id":           "m1111111-1111-1111-1111-111111111111",
-			"first_name":   "Айбек",
-			"last_name":    "Касымов",
-			"role_display": "Топ-барбер",
-			"avatar":       nil,
-		},
-		{
-			"id":           "m2222222-2222-2222-2222-222222222222",
-			"first_name":   "Адилет",
-			"last_name":    "Оморов",
-			"role_display": "Мастер",
-			"avatar":       nil,
-		},
+	ctx, cancel := context.WithTimeout(r.Context(), 4*time.Second)
+	defer cancel()
+
+	comp, status, err := gw.getCompanyBySlug(ctx, slug)
+	if err != nil {
+		if status == http.StatusNotFound {
+			http.Error(w, `{"code":"not_found","message":"Company not found"}`, http.StatusNotFound)
+			return
+		}
+		http.Error(w, `{"code":"bad_gateway","message":"Failed to resolve company"}`, http.StatusBadGateway)
+		return
 	}
-	json.NewEncoder(w).Encode(masters)
+
+	url := fmt.Sprintf("%s/internal/v1/masters/?company_id=%s", gw.cfg.AuthServiceURL, comp.ID)
+	resp, err := gw.doInternalRequest(ctx, "auth-service", http.MethodGet, url, nil, nil)
+	if err != nil {
+		log.Printf("Error contacting auth-service for masters: %v", err)
+		http.Error(w, `{"code":"bad_gateway","message":"Auth service unavailable"}`, http.StatusBadGateway)
+		return
+	}
+	defer resp.Body.Close()
+
+	w.WriteHeader(resp.StatusCode)
+	io.Copy(w, resp.Body)
+}
+
+func parseWorkHours(timeStr string, defaultH, defaultM int) (int, int) {
+	if timeStr == "" {
+		return defaultH, defaultM
+	}
+	parts := strings.Split(timeStr, ":")
+	if len(parts) >= 2 {
+		h, err1 := strconv.Atoi(parts[0])
+		m, err2 := strconv.Atoi(parts[1])
+		if err1 == nil && err2 == nil {
+			return h, m
+		}
+	}
+	return defaultH, defaultM
 }
 
 func (gw *PublicGateway) handleAvailability(w http.ResponseWriter, r *http.Request, slug string) {
+	ctx, cancel := context.WithTimeout(r.Context(), 4*time.Second)
+	defer cancel()
+
+	comp, status, err := gw.getCompanyBySlug(ctx, slug)
+	if err != nil {
+		if status == http.StatusNotFound {
+			http.Error(w, `{"code":"not_found","message":"Company not found"}`, http.StatusNotFound)
+			return
+		}
+		http.Error(w, `{"code":"bad_gateway","message":"Failed to resolve company"}`, http.StatusBadGateway)
+		return
+	}
+
 	dateStr := r.URL.Query().Get("date")
 	if dateStr == "" {
 		dateStr = time.Now().Format("2006-01-02")
@@ -214,17 +354,31 @@ func (gw *PublicGateway) handleAvailability(w http.ResponseWriter, r *http.Reque
 
 	masterID := r.URL.Query().Get("master_id")
 
-	// Work interval: 09:00 - 21:00
-	workStartH, workStartM := 9, 0
-	workEndH, workEndM := 21, 0
+	// Dynamic work interval from company settings
+	workStartH, workStartM := parseWorkHours(comp.AppointmentWorkStart, 9, 0)
+	workEndH, workEndM := parseWorkHours(comp.AppointmentWorkEnd, 21, 0)
 
-	// Simulated busy intervals for testing
 	var busyIntervals []availability.Interval
 	if masterID != "" {
-		// Mock a busy slot 13:00 - 14:00
-		bStart := time.Date(targetDate.Year(), targetDate.Month(), targetDate.Day(), 13, 0, 0, 0, targetDate.Location())
-		bEnd := time.Date(targetDate.Year(), targetDate.Month(), targetDate.Day(), 14, 0, 0, 0, targetDate.Location())
-		busyIntervals = append(busyIntervals, availability.Interval{Start: bStart, End: bEnd})
+		url := fmt.Sprintf("%s/internal/v1/appointments/busy-slots/?company_id=%s&master_id=%s&date=%s",
+			gw.cfg.ScheduleServiceURL, comp.ID, masterID, dateStr)
+		resp, err := gw.doInternalRequest(ctx, "schedule-service", http.MethodGet, url, nil, nil)
+		if err == nil && resp.StatusCode == http.StatusOK {
+			var slots []struct {
+				StartAt string `json:"start_at"`
+				EndAt   string `json:"end_at"`
+			}
+			if err := json.NewDecoder(resp.Body).Decode(&slots); err == nil {
+				for _, s := range slots {
+					t1, err1 := time.Parse(time.RFC3339, s.StartAt)
+					t2, err2 := time.Parse(time.RFC3339, s.EndAt)
+					if err1 == nil && err2 == nil {
+						busyIntervals = append(busyIntervals, availability.Interval{Start: t1, End: t2})
+					}
+				}
+			}
+			resp.Body.Close()
+		}
 	}
 
 	slots := gw.engine.ComputeAvailableSlots(targetDate, workStartH, workStartM, workEndH, workEndM, durationMin, busyIntervals)
@@ -240,9 +394,12 @@ func (gw *PublicGateway) handleAvailability(w http.ResponseWriter, r *http.Reque
 }
 
 func (gw *PublicGateway) handleCreateBooking(w http.ResponseWriter, r *http.Request, slug string) {
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	defer cancel()
+
 	bodyBytes, err := io.ReadAll(r.Body)
 	if err != nil {
-		http.Error(w, `{"code":"bad_request"}`, http.StatusBadRequest)
+		http.Error(w, `{"code":"bad_request","message":"Failed to read body"}`, http.StatusBadRequest)
 		return
 	}
 
@@ -252,46 +409,43 @@ func (gw *PublicGateway) handleCreateBooking(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	// Get company info by slug from auth-service
-	companyResp, err := http.Get(fmt.Sprintf("%s/internal/v1/companies/slug/%s/", gw.cfg.AuthServiceURL, slug))
-	var companyID string
-	if err == nil && companyResp.StatusCode == http.StatusOK {
-		var compData map[string]interface{}
-		json.NewDecoder(companyResp.Body).Decode(&compData)
-		companyID, _ = compData["id"].(string)
-		companyResp.Body.Close()
-	}
-
-	if companyID == "" {
-		// Fallback sample UUID if auth service is offline
-		companyID = "00000000-0000-0000-0000-000000000001"
-	}
-
-	reqData["company_id"] = companyID
-
-	// Forward to booking-service internal endpoint
-	bookingPayload, _ := json.Marshal(reqData)
-	bookingResp, err := http.Post(
-		fmt.Sprintf("%s/internal/v1/bookings/", gw.cfg.BookingServiceURL),
-		"application/json",
-		bytes.NewReader(bookingPayload),
-	)
-
-	if err != nil || bookingResp.StatusCode >= 400 {
-		// Fallback confirmation response if booking service is offline
-		resp := map[string]interface{}{
-			"id":           "b0000000-0000-0000-0000-000000000001",
-			"status":       "new",
-			"client_name":  reqData["client_name"],
-			"client_phone": reqData["client_phone"],
-			"message":      "Ваша заявка принята! Администратор свяжется с вами для подтверждения.",
+	// 1. Resolve company by slug from auth-service
+	comp, status, err := gw.getCompanyBySlug(ctx, slug)
+	if err != nil {
+		if status == http.StatusNotFound {
+			http.Error(w, `{"code":"not_found","message":"Company not found"}`, http.StatusNotFound)
+			return
 		}
-		w.WriteHeader(http.StatusCreated)
-		json.NewEncoder(w).Encode(resp)
+		http.Error(w, `{"code":"bad_gateway","message":"Failed to resolve company"}`, http.StatusBadGateway)
 		return
 	}
 
+	reqData["company_id"] = comp.ID
+
+	// 2. Forward to booking-service internal endpoint with signed token
+	bookingPayload, err := json.Marshal(reqData)
+	if err != nil {
+		http.Error(w, `{"code":"internal_error","message":"Failed to serialize booking request"}`, http.StatusInternalServerError)
+		return
+	}
+
+	extraHeaders := make(map[string]string)
+	if idemp := r.Header.Get("Idempotency-Key"); idemp != "" {
+		extraHeaders["Idempotency-Key"] = idemp
+	} else if idemp := r.Header.Get("X-Idempotency-Key"); idemp != "" {
+		extraHeaders["Idempotency-Key"] = idemp
+	}
+
+	bookingURL := fmt.Sprintf("%s/internal/v1/bookings/", gw.cfg.BookingServiceURL)
+	bookingResp, err := gw.doInternalRequest(ctx, "booking-service", http.MethodPost, bookingURL, bytes.NewReader(bookingPayload), extraHeaders)
+	if err != nil {
+		log.Printf("Error contacting booking-service: %v", err)
+		http.Error(w, `{"code":"bad_gateway","message":"Booking service unavailable"}`, http.StatusBadGateway)
+		return
+	}
+	defer bookingResp.Body.Close()
+
+	// 3. Transparently forward the response status and body from booking-service
 	w.WriteHeader(bookingResp.StatusCode)
 	io.Copy(w, bookingResp.Body)
-	bookingResp.Body.Close()
 }

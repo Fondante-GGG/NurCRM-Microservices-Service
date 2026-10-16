@@ -11,6 +11,7 @@ import (
 	"time"
 
 	_ "github.com/lib/pq"
+	"github.com/nurcrm/backend/libs/go_common/jwks"
 )
 
 const AdvisoryLockID = 987654321
@@ -91,6 +92,19 @@ func runTick(db *sql.DB, scheduleURL string) {
 	if err != nil {
 		log.Printf("Failed to create request: %v", err)
 		return
+	}
+
+	// Generate service token
+	privKey, err := jwks.LoadPrivateKey("")
+	if err == nil {
+		token, err := jwks.CreateInternalToken("scheduler-worker", "schedule-service", privKey)
+		if err == nil {
+			req.Header.Set("Authorization", "Bearer "+token)
+		} else {
+			log.Printf("Warning: failed to sign internal token: %v", err)
+		}
+	} else {
+		log.Printf("Warning: failed to load private key for internal token: %v", err)
 	}
 
 	client := &http.Client{Timeout: 10 * time.Second}

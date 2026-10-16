@@ -3,7 +3,7 @@ from rest_framework.response import Response
 from rest_framework import status
 import uuid
 
-from libs.common.auth import KeyManager, verify_token, verify_internal_token
+from libs.common.auth import KeyManager, verify_token, verify_internal_token, verify_internal_service_request
 from libs.common.exceptions import UnauthorizedError, ForbiddenError, NotFoundError, CRMException
 from libs.common.response import error_response
 from backend.services.auth.application.dto import LoginRequestDTO, CreateEmployeeDTO
@@ -78,7 +78,12 @@ class RefreshView(APIView):
                 )
             uow = DjangoAuthUnitOfWork()
             res = RefreshUseCase(uow).execute(refresh_token)
-            return Response({"access": res["access_token"]})
+            return Response({
+                "access": res["access_token"],
+                "access_token": res["access_token"],
+                "refresh": res.get("refresh_token"),
+                "refresh_token": res.get("refresh_token"),
+            })
         except CRMException as e:
             return Response(error_response(e.code, e.message, e.details), status=e.status_code)
 
@@ -162,7 +167,7 @@ class EmployeeListView(APIView):
     def post(self, request):
         try:
             user = get_current_user_from_request(request)
-            if user.role != "owner" and user.role != "admin":
+            if user.role not in ("owner", "admin", "support"):
                 return Response(error_response("forbidden", "Only owner or admin can create employees"), status=403)
 
             data = request.data
@@ -194,52 +199,60 @@ class EmployeeListView(APIView):
 # Internal API views
 class InternalCompanyView(APIView):
     def get(self, request, company_id=None, slug=None):
-        repo = DjangoCompanyRepository()
-        if company_id:
-            c = repo.get_by_id(uuid.UUID(str(company_id)))
-        elif slug:
-            c = repo.get_by_slug(slug)
-        else:
-            return Response(error_response("validation_error", "company_id or slug required"), status=400)
+        try:
+            verify_internal_service_request(request, "auth-service")
+            repo = DjangoCompanyRepository()
+            if company_id:
+                c = repo.get_by_id(uuid.UUID(str(company_id)))
+            elif slug:
+                c = repo.get_by_slug(slug)
+            else:
+                return Response(error_response("validation_error", "company_id or slug required"), status=400)
 
-        if not c:
-            return Response(error_response("not_found", "Company not found"), status=404)
+            if not c:
+                return Response(error_response("not_found", "Company not found"), status=404)
 
-        return Response({
-            "id": str(c.id),
-            "name": c.name,
-            "slug": c.slug,
-            "appointment_work_start": str(c.appointment_work_start),
-            "appointment_work_end": str(c.appointment_work_end),
-            "subscription_plan": c.subscription_plan,
-        })
+            return Response({
+                "id": str(c.id),
+                "name": c.name,
+                "slug": c.slug,
+                "appointment_work_start": str(c.appointment_work_start),
+                "appointment_work_end": str(c.appointment_work_end),
+                "subscription_plan": c.subscription_plan,
+            })
+        except CRMException as e:
+            return Response(error_response(e.code, e.message, e.details), status=e.status_code)
 
 
 class InternalMastersView(APIView):
     def get(self, request):
-        company_id = request.query_params.get("company_id")
-        slug = request.query_params.get("slug")
-        c_repo = DjangoCompanyRepository()
-        if slug and not company_id:
-            c = c_repo.get_by_slug(slug)
-            if not c:
-                return Response(error_response("not_found", "Company slug not found"), status=404)
-            company_id = str(c.id)
+        try:
+            verify_internal_service_request(request, "auth-service")
+            company_id = request.query_params.get("company_id")
+            slug = request.query_params.get("slug")
+            c_repo = DjangoCompanyRepository()
+            if slug and not company_id:
+                c = c_repo.get_by_slug(slug)
+                if not c:
+                    return Response(error_response("not_found", "Company slug not found"), status=404)
+                company_id = str(c.id)
 
-        if not company_id:
-            return Response(error_response("validation_error", "company_id or slug required"), status=400)
+            if not company_id:
+                return Response(error_response("validation_error", "company_id or slug required"), status=400)
 
-        emp_repo = DjangoEmployeeRepository()
-        masters = emp_repo.list_by_company(uuid.UUID(company_id))
-        return Response([
-            {
-                "id": str(m.id),
-                "first_name": m.first_name,
-                "last_name": m.last_name,
-                "role": m.role,
-                "role_display": m.role_display,
-                "avatar": m.avatar,
-                "is_active": m.is_active,
-            }
-            for m in masters if m.is_active
-        ])
+            emp_repo = DjangoEmployeeRepository()
+            masters = emp_repo.list_by_company(uuid.UUID(company_id))
+            return Response([
+                {
+                    "id": str(m.id),
+                    "first_name": m.first_name,
+                    "last_name": m.last_name,
+                    "role": m.role,
+                    "role_display": m.role_display,
+                    "avatar": m.avatar,
+                    "is_active": m.is_active,
+                }
+                for m in masters if m.is_active
+            ])
+        except CRMException as e:
+            return Response(error_response(e.code, e.message, e.details), status=e.status_code)

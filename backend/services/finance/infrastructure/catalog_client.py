@@ -22,6 +22,9 @@ class HttpCatalogClient(CatalogClientPort):
             if master_id:
                 params["master_id"] = str(master_id)
             res = self.client.get(f"/internal/v1/rates/{service_id}/", params=params)
-            return Decimal(str(res.get("percent", "40.00")))
+            percent_val = res.get("percent")
+            if percent_val is not None:
+                return Decimal(str(percent_val))
+            return Decimal("0.00")
         except Exception:
-            return Decimal("40.00")
+            return Decimal("0.00")

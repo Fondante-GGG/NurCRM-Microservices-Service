@@ -3,7 +3,7 @@ from pydantic import BaseModel
 from typing import Optional, List
 import uuid
 
-from libs.common.auth import verify_token, JWTUser
+from libs.common.auth import verify_token, verify_internal_token, JWTUser
 from backend.services.notification.infrastructure.repositories import NotificationRepository
 from backend.services.notification.application.use_cases import (
     SendNotificationUseCase,
@@ -21,6 +21,16 @@ def get_current_user(authorization: Optional[str] = Header(None)) -> JWTUser:
     token = authorization.split(" ")[1]
     try:
         return verify_token(token)
+    except Exception as e:
+        raise HTTPException(status_code=401, detail={"code": "unauthorized", "message": str(e)})
+
+
+def verify_internal_auth(authorization: Optional[str] = Header(None)):
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail={"code": "unauthorized", "message": "Missing internal service Bearer token"})
+    token = authorization.split(" ")[1]
+    try:
+        return verify_internal_token(token, expected_audience="notification-service")
     except Exception as e:
         raise HTTPException(status_code=401, detail={"code": "unauthorized", "message": str(e)})
 
@@ -69,7 +79,7 @@ def list_notifications(current_user: JWTUser = Depends(get_current_user)):
 
 
 @app.post("/internal/v1/notifications/process-reminders/")
-def trigger_reminders():
+def trigger_reminders(auth = Depends(verify_internal_auth)):
     use_case = ProcessPendingRemindersUseCase(repo)
     count = use_case.execute()
     return {"reminders_sent": count}

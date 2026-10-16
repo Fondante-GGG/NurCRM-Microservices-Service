@@ -7,6 +7,7 @@ from backend.services.catalog.interface.views import (
     SalaryRatesView,
     InternalServicesView,
     InternalRateView,
+    InternalCategoriesView,
 )
 
 urlpatterns = [
@@ -27,6 +28,7 @@ urlpatterns = [
     path("api/barbershop/salary/rates/<uuid:service_id>/", SalaryRatesView.as_view(), name="legacy-rate-detail"),
 
     # Internal API
+    path("internal/v1/categories/", InternalCategoriesView.as_view(), name="internal-categories"),
     path("internal/v1/services/", InternalServicesView.as_view(), name="internal-services"),
     path("internal/v1/rates/<uuid:service_id>/", InternalRateView.as_view(), name="internal-rate"),
 ]

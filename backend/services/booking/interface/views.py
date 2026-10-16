@@ -5,7 +5,7 @@ import uuid
 from decimal import Decimal
 from datetime import date, time
 
-from libs.common.auth import verify_token
+from libs.common.auth import verify_token, verify_internal_service_request
 from libs.common.exceptions import UnauthorizedError, ForbiddenError, CRMException, NotFoundError
 from libs.common.response import error_response
 from libs.common.pagination import PaginationParams, paginate_results
@@ -170,6 +170,7 @@ class InternalBookingCreateView(APIView):
 
     def post(self, request):
         try:
+            verify_internal_service_request(request, "booking-service")
             data = request.data
             d = date.fromisoformat(data["date"])
             t_start = time.fromisoformat(data["time_start"])

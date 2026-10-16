@@ -5,6 +5,7 @@ from datetime import datetime, time, timezone
 from typing import List, Optional
 import hashlib
 import hmac
+import secrets
 
 from libs.common.domain import AggregateRoot, Entity
 from libs.common.auth import Permissions
@@ -108,12 +109,32 @@ class Employee(AggregateRoot):
     updated_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
     @staticmethod
-    def hash_password(password: str) -> str:
-        salt = "nurcrm_secure_salt_"
-        return hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt.encode("utf-8"), 100000).hex()
+    def hash_password(password: str, salt: Optional[str] = None) -> str:
+        iterations = 100000
+        if salt is None:
+            salt = secrets.token_hex(16)
+        computed_hash = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt.encode("utf-8"), iterations).hex()
+        return f"pbkdf2_sha256${iterations}${salt}${computed_hash}"
 
     def check_password(self, password: str) -> bool:
-        return hmac.compare_digest(self.password_hash, self.hash_password(password))
+        if not self.password_hash:
+            return False
+        # Modern salted pbkdf2 format: pbkdf2_sha256$<iterations>$<salt>$<hash>
+        if self.password_hash.startswith("pbkdf2_sha256$"):
+            try:
+                parts = self.password_hash.split("$")
+                if len(parts) == 4:
+                    iterations = int(parts[1])
+                    salt = parts[2]
+                    expected_hash = parts[3]
+                    actual_hash = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt.encode("utf-8"), iterations).hex()
+                    return hmac.compare_digest(expected_hash, actual_hash)
+            except Exception:
+                return False
+        # Legacy fallback format: static salt
+        legacy_salt = "nurcrm_secure_salt_"
+        legacy_hash = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), legacy_salt.encode("utf-8"), 100000).hex()
+        return hmac.compare_digest(self.password_hash, legacy_hash)
 
     @property
     def permissions(self) -> List[str]:

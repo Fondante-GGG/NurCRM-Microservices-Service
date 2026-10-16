@@ -5,7 +5,7 @@ import uuid
 from decimal import Decimal
 from datetime import date
 
-from libs.common.auth import verify_token
+from libs.common.auth import verify_token, verify_internal_service_request
 from libs.common.exceptions import UnauthorizedError, ForbiddenError, CRMException, NotFoundError
 from libs.common.response import error_response
 from libs.common.pagination import PaginationParams, paginate_results
@@ -39,6 +39,9 @@ class ShiftListCreateView(APIView):
     def get(self, request):
         try:
             user = get_current_user_from_request(request)
+            if not user.has_perm("can_view_cashbox") and user.role not in ("owner", "admin", "support"):
+                return Response(error_response("forbidden", "Cashbox permission required"), status=403)
+
             repo = DjangoCashShiftRepository()
             shifts = repo.list_by_company(uuid.UUID(user.company_id))
 
@@ -64,6 +67,9 @@ class ShiftListCreateView(APIView):
     def post(self, request):
         try:
             user = get_current_user_from_request(request)
+            if not user.has_perm("can_view_cashbox") and user.role not in ("owner", "admin", "support"):
+                return Response(error_response("forbidden", "Cashbox permission required"), status=403)
+
             data = request.data
             cashbox = data.get("cashbox", "Основная касса")
             opening_cash = Decimal(str(data.get("opening_cash", "0.00")))
@@ -90,6 +96,9 @@ class ShiftCloseView(APIView):
     def post(self, request, shift_id):
         try:
             user = get_current_user_from_request(request)
+            if not user.has_perm("can_view_cashbox") and user.role not in ("owner", "admin", "support"):
+                return Response(error_response("forbidden", "Cashbox permission required"), status=403)
+
             data = request.data
             closing_cash = Decimal(str(data.get("closing_cash", "0.00")))
             sales_total = Decimal(str(data.get("sales_total", "0.00")))
@@ -271,6 +280,7 @@ class WarehouseMaterialsView(APIView):
 class InternalProcessCompletedAppointmentView(APIView):
     def post(self, request):
         try:
+            verify_internal_service_request(request, "finance-service")
             data = request.data
             company_id = uuid.UUID(data["company_id"])
             appointment_id = uuid.UUID(data["appointment_id"])

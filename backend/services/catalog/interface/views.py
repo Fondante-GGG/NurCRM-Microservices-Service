@@ -4,7 +4,7 @@ from rest_framework import status
 import uuid
 from decimal import Decimal
 
-from libs.common.auth import verify_token
+from libs.common.auth import verify_token, verify_internal_service_request
 from libs.common.exceptions import UnauthorizedError, ForbiddenError, CRMException, NotFoundError
 from libs.common.response import error_response
 from libs.common.pagination import PaginationParams, paginate_results
@@ -53,6 +53,8 @@ class CategoryListCreateView(APIView):
     def post(self, request):
         try:
             user = get_current_user_from_request(request)
+            if user.role not in ("owner", "admin", "support"):
+                return Response(error_response("forbidden", "Only owner, admin, or support can create categories"), status=403)
             name = request.data.get("name")
             if not name:
                 return Response(error_response("validation_error", "Category name is required"), status=400)
@@ -71,6 +73,8 @@ class CategoryDetailView(APIView):
     def delete(self, request, category_id):
         try:
             user = get_current_user_from_request(request)
+            if user.role not in ("owner", "admin", "support"):
+                return Response(error_response("forbidden", "Only owner, admin, or support can delete categories"), status=403)
             repo = DjangoServiceCategoryRepository()
             repo.delete(uuid.UUID(user.company_id), uuid.UUID(str(category_id)))
             return Response(status=204)
@@ -114,6 +118,8 @@ class ServiceListCreateView(APIView):
     def post(self, request):
         try:
             user = get_current_user_from_request(request)
+            if user.role not in ("owner", "admin", "support"):
+                return Response(error_response("forbidden", "Only owner, admin, or support can create services"), status=403)
             data = request.data
             barbers = [uuid.UUID(str(b)) for b in data.get("barbers", [])]
             dto = CreateServiceDTO(
@@ -146,6 +152,8 @@ class ServiceDetailView(APIView):
     def patch(self, request, service_id):
         try:
             user = get_current_user_from_request(request)
+            if user.role not in ("owner", "admin", "support"):
+                return Response(error_response("forbidden", "Only owner, admin, or support can update services"), status=403)
             data = request.data
             if_match = request.headers.get("If-Match")
             expected_ver = int(if_match) if if_match and if_match.isdigit() else data.get("expected_version")
@@ -179,6 +187,8 @@ class ServiceDetailView(APIView):
     def delete(self, request, service_id):
         try:
             user = get_current_user_from_request(request)
+            if user.role not in ("owner", "admin", "support"):
+                return Response(error_response("forbidden", "Only owner, admin, or support can delete services"), status=403)
             repo = DjangoServiceRepository()
             repo.delete(uuid.UUID(user.company_id), uuid.UUID(str(service_id)))
             return Response(status=204)
@@ -190,7 +200,7 @@ class SalaryRatesView(APIView):
     def get(self, request):
         try:
             user = get_current_user_from_request(request)
-            if not user.has_perm("can_view_salary"):
+            if not user.has_perm("can_view_salary") and user.role not in ("owner", "admin", "support"):
                 return Response(error_response("forbidden", "Salary permission required"), status=403)
 
             repo = DjangoSalaryRateRepository()
@@ -210,8 +220,8 @@ class SalaryRatesView(APIView):
     def put(self, request, service_id):
         try:
             user = get_current_user_from_request(request)
-            if not user.has_perm("can_view_salary"):
-                return Response(error_response("forbidden", "Salary permission required"), status=403)
+            if user.role not in ("owner", "admin", "support"):
+                return Response(error_response("forbidden", "Only owner, admin, or support can set salary rates"), status=403)
 
             percent = Decimal(str(request.data.get("percent", "0")))
             master_id = request.data.get("master_id")
@@ -235,38 +245,74 @@ class SalaryRatesView(APIView):
 
 
 # Internal API views
+class InternalCategoriesView(APIView):
+    def get(self, request):
+        try:
+            verify_internal_service_request(request, "catalog-service")
+            company_id = request.query_params.get("company_id")
+            if not company_id:
+                return Response(error_response("validation_error", "company_id is required"), status=400)
+
+            repo = DjangoServiceCategoryRepository()
+            categories = repo.list_by_company(uuid.UUID(company_id))
+            return Response([
+                {
+                    "id": str(c.id),
+                    "name": c.name,
+                    "is_active": c.is_active,
+                }
+                for c in categories if c.is_active
+            ])
+        except CRMException as e:
+            return Response(error_response(e.code, e.message, e.details), status=e.status_code)
+
+
 class InternalServicesView(APIView):
     def get(self, request):
-        company_id = request.query_params.get("company_id")
-        service_ids_str = request.query_params.get("service_ids", "")
-        if not company_id:
-            return Response(error_response("validation_error", "company_id is required"), status=400)
+        try:
+            verify_internal_service_request(request, "catalog-service")
+            company_id = request.query_params.get("company_id")
+            service_ids_str = request.query_params.get("service_ids", "")
+            if not company_id:
+                return Response(error_response("validation_error", "company_id is required"), status=400)
 
-        service_ids = [uuid.UUID(s.strip()) for s in service_ids_str.split(",") if s.strip()]
-        repo = DjangoServiceRepository()
-        services = repo.list_by_ids(uuid.UUID(company_id), service_ids)
-        return Response([
-            {
-                "id": str(s.id),
-                "name": s.name,
-                "price": str(s.price.amount),
-                "time_minutes": s.time_minutes,
-                "barbers": [str(b) for b in s.barbers],
-                "is_active": s.is_active,
-            }
-            for s in services
-        ])
+            repo = DjangoServiceRepository()
+            if service_ids_str:
+                service_ids = [uuid.UUID(s.strip()) for s in service_ids_str.split(",") if s.strip()]
+                services = repo.list_by_ids(uuid.UUID(company_id), service_ids)
+            else:
+                services = [s for s in repo.list_by_company(uuid.UUID(company_id)) if s.is_active]
+
+            return Response([
+                {
+                    "id": str(s.id),
+                    "category_id": str(s.category_id),
+                    "name": s.name,
+                    "price": str(s.price.amount),
+                    "time": s.time_minutes,
+                    "time_minutes": s.time_minutes,
+                    "barbers": [str(b) for b in s.barbers],
+                    "is_active": s.is_active,
+                }
+                for s in services
+            ])
+        except CRMException as e:
+            return Response(error_response(e.code, e.message, e.details), status=e.status_code)
 
 
 class InternalRateView(APIView):
     def get(self, request, service_id):
-        company_id = request.query_params.get("company_id")
-        master_id = request.query_params.get("master_id")
-        if not company_id:
-            return Response(error_response("validation_error", "company_id is required"), status=400)
+        try:
+            verify_internal_service_request(request, "catalog-service")
+            company_id = request.query_params.get("company_id")
+            master_id = request.query_params.get("master_id")
+            if not company_id:
+                return Response(error_response("validation_error", "company_id is required"), status=400)
 
-        master_uuid = uuid.UUID(master_id) if master_id else None
-        repo = DjangoSalaryRateRepository()
-        rate = repo.get_rate(uuid.UUID(company_id), uuid.UUID(str(service_id)), master_uuid)
-        percent = float(rate.percent) if rate else 0.0
-        return Response({"percent": percent})
+            master_uuid = uuid.UUID(master_id) if master_id else None
+            repo = DjangoSalaryRateRepository()
+            rate = repo.get_rate(uuid.UUID(company_id), uuid.UUID(str(service_id)), master_uuid)
+            percent = float(rate.percent) if rate else 0.0
+            return Response({"percent": percent})
+        except CRMException as e:
+            return Response(error_response(e.code, e.message, e.details), status=e.status_code)

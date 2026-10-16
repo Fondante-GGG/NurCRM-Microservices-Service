@@ -170,7 +170,7 @@ class TestBookingConfirmationSaga:
         def __exit__(self, *args):
             pass
 
-        def get_by_id(self, company_id, booking_id):
+        def get_by_id(self, company_id, booking_id, for_update=False):
             return self.booking
 
         def save(self, b):

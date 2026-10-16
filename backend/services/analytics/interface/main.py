@@ -29,6 +29,9 @@ def get_dashboard(
     date_to: Optional[date] = None,
     current_user: JWTUser = Depends(get_current_user),
 ):
+    if current_user.role not in ("owner", "admin", "support") and not current_user.has_perm("can_view_salary") and not current_user.has_perm("can_view_cashbox"):
+        raise HTTPException(status_code=403, detail={"code": "forbidden", "message": "Permission denied for analytics"})
+
     repo = AnalyticsRepository()
     dashboard = repo.get_dashboard(
         company_id=uuid.UUID(current_user.company_id),

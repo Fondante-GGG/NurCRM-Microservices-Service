@@ -3,7 +3,7 @@ import uuid
 import hashlib
 from typing import Optional, Protocol, List
 
-from libs.common.auth import create_access_token, create_refresh_token, verify_token
+from libs.common.auth import create_access_token, create_refresh_token, verify_token, verify_refresh_token
 from libs.common.exceptions import UnauthorizedError, NotFoundError, ValidationError, ConflictError
 from libs.common.events import EventEnvelope, EventTypes
 from libs.common.outbox import OutboxRecord
@@ -95,7 +95,7 @@ class RefreshUseCase:
         self.uow = uow
 
     def execute(self, refresh_token: str) -> dict:
-        jwt_user = verify_token(refresh_token)
+        jwt_user = verify_refresh_token(refresh_token)
         if not jwt_user.sid:
             raise UnauthorizedError("Invalid refresh token")
 
@@ -103,6 +103,14 @@ class RefreshUseCase:
             session = self.uow.sessions.get_by_id(uuid.UUID(jwt_user.sid))
             if not session or session.is_revoked:
                 raise UnauthorizedError("Session has been revoked")
+
+            # Check refresh token hash if present
+            current_hash = hashlib.sha256(refresh_token.encode("utf-8")).hexdigest()
+            if session.refresh_token_hash and session.refresh_token_hash != current_hash:
+                # Reuse detected: revoke session
+                session.revoke()
+                self.uow.sessions.save(session)
+                raise UnauthorizedError("Refresh token reuse detected. Session revoked.")
 
             employee = self.uow.employees.get_by_id(
                 uuid.UUID(jwt_user.company_id), uuid.UUID(jwt_user.user_id)
@@ -118,7 +126,18 @@ class RefreshUseCase:
                 sid=jwt_user.sid,
                 email=employee.email,
             )
-            return {"access_token": new_access_token}
+            new_refresh_token = create_refresh_token(
+                user_id=str(employee.id),
+                company_id=str(employee.company_id),
+                sid=jwt_user.sid,
+            )
+            session.refresh_token_hash = hashlib.sha256(new_refresh_token.encode("utf-8")).hexdigest()
+            self.uow.sessions.save(session)
+
+            return {
+                "access_token": new_access_token,
+                "refresh_token": new_refresh_token,
+            }
 
 
 class CreateEmployeeUseCase:

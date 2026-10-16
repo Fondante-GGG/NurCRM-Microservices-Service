@@ -24,6 +24,7 @@ class CreateAppointmentDTO:
     discount: Optional[Decimal] = None
     comment: str = ""
     status: str = "booked"
+    idempotency_key: Optional[str] = None
 
 
 @dataclass

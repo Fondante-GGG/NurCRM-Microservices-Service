@@ -2,7 +2,9 @@ FROM golang:1.22-alpine AS builder
 
 WORKDIR /app
 
+COPY libs/go_common ./libs/go_common
 COPY services/scheduler-worker ./services/scheduler-worker
+COPY keys ./keys
 
 WORKDIR /app/services/scheduler-worker
 RUN go mod tidy
@@ -11,4 +13,5 @@ RUN CGO_ENABLED=0 GOOS=linux go build -o /app/scheduler-worker ./cmd/main.go
 FROM alpine:3.19
 WORKDIR /app
 COPY --from=builder /app/scheduler-worker .
+COPY keys ./keys
 CMD ["./scheduler-worker"]

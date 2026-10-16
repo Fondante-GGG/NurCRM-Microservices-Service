@@ -5,7 +5,7 @@ import uuid
 from decimal import Decimal
 from datetime import datetime, date, timezone
 
-from libs.common.auth import verify_token
+from libs.common.auth import verify_token, verify_internal_service_request
 from libs.common.exceptions import UnauthorizedError, ForbiddenError, CRMException, NotFoundError, SlotBusyError
 from libs.common.response import error_response
 from libs.common.pagination import PaginationParams, paginate_results
@@ -130,6 +130,8 @@ class AppointmentListCreateView(APIView):
 
             disc = Decimal(str(data["discount"])) if "discount" in data and data["discount"] is not None else None
 
+            idempotency_key = request.headers.get("Idempotency-Key") or data.get("idempotency_key")
+
             dto = CreateAppointmentDTO(
                 company_id=uuid.UUID(user.company_id),
                 client_name=data.get("client_name", "Клиент"),
@@ -140,6 +142,7 @@ class AppointmentListCreateView(APIView):
                 discount=disc,
                 comment=data.get("comment", ""),
                 status=status_val,
+                idempotency_key=idempotency_key,
             )
             uow = DjangoScheduleUnitOfWork()
             catalog_client = HttpCatalogClient()
@@ -442,39 +445,49 @@ class MyAppointmentsView(APIView):
 # Internal API views
 class InternalBusySlotsView(APIView):
     def get(self, request):
-        company_id = request.query_params.get("company_id")
-        barber_id = request.query_params.get("master_id") or request.query_params.get("barber_id")
-        date_str = request.query_params.get("date")
+        try:
+            verify_internal_service_request(request, "schedule-service")
+            company_id = request.query_params.get("company_id")
+            barber_id = request.query_params.get("master_id") or request.query_params.get("barber_id")
+            date_str = request.query_params.get("date")
 
-        if not company_id or not barber_id or not date_str:
-            return Response(error_response("validation_error", "company_id, master_id, and date are required"), status=400)
+            if not company_id or not barber_id or not date_str:
+                return Response(error_response("validation_error", "company_id, master_id, and date are required"), status=400)
 
-        target_date = date.fromisoformat(date_str)
-        uow = DjangoScheduleUnitOfWork()
-        busy = GetBusyIntervalsUseCase(uow).execute(
-            company_id=uuid.UUID(company_id),
-            barber_id=uuid.UUID(barber_id),
-            target_date=target_date,
-        )
-        return Response([{"start_at": b.start_at, "end_at": b.end_at} for b in busy])
+            target_date = date.fromisoformat(date_str)
+            uow = DjangoScheduleUnitOfWork()
+            busy = GetBusyIntervalsUseCase(uow).execute(
+                company_id=uuid.UUID(company_id),
+                barber_id=uuid.UUID(barber_id),
+                target_date=target_date,
+            )
+            return Response([{"start_at": b.start_at, "end_at": b.end_at} for b in busy])
+        except CRMException as e:
+            return Response(error_response(e.code, e.message, e.details), status=e.status_code)
 
 
 class InternalAutoCompleteView(APIView):
     def post(self, request):
-        uow = DjangoScheduleUnitOfWork()
-        count = AutoCompleteAppointmentsUseCase(uow).execute()
-        return Response({"completed_count": count})
+        try:
+            verify_internal_service_request(request, "schedule-service")
+            uow = DjangoScheduleUnitOfWork()
+            count = AutoCompleteAppointmentsUseCase(uow).execute()
+            return Response({"completed_count": count})
+        except CRMException as e:
+            return Response(error_response(e.code, e.message, e.details), status=e.status_code)
 
 
 class InternalCreateAppointmentView(APIView):
     def post(self, request):
         try:
+            verify_internal_service_request(request, "schedule-service")
             data = request.data
             service_ids = [uuid.UUID(str(s)) for s in data.get("services", [])]
             start_at = datetime.fromisoformat(data["start_at"])
             client_id = uuid.UUID(data["client_id"]) if data.get("client_id") else None
             barber_id = uuid.UUID(data.get("barber_id") or data.get("barber"))
             disc = Decimal(str(data["discount"])) if "discount" in data and data["discount"] is not None else None
+            idempotency_key = request.headers.get("Idempotency-Key") or data.get("idempotency_key")
 
             dto = CreateAppointmentDTO(
                 company_id=uuid.UUID(data["company_id"]),
@@ -486,6 +499,7 @@ class InternalCreateAppointmentView(APIView):
                 discount=disc,
                 comment=data.get("comment", ""),
                 status=data.get("status", "confirmed"),
+                idempotency_key=idempotency_key,
             )
             uow = DjangoScheduleUnitOfWork()
             catalog_client = HttpCatalogClient()

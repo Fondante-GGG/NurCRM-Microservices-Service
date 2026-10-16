@@ -132,7 +132,7 @@ class ConfirmBookingSagaUseCase:
 
     def execute(self, company_id: uuid.UUID, booking_id: uuid.UUID, actor_name: Optional[str] = None) -> BookingRequestDTO:
         with self.uow:
-            booking = self.uow.bookings.get_by_id(company_id, booking_id)
+            booking = self.uow.bookings.get_by_id(company_id, booking_id, for_update=True)
             if not booking:
                 raise NotFoundError(f"Booking request {booking_id} not found")
 

@@ -31,9 +31,14 @@ class DjangoBookingRequestRepository(BookingRequestRepository):
             updated_at=m.updated_at,
         )
 
-    def get_by_id(self, company_id: uuid.UUID, booking_id: uuid.UUID) -> Optional[BookingRequest]:
+    def get_by_id(self, company_id: uuid.UUID, booking_id: uuid.UUID, for_update: bool = False) -> Optional[BookingRequest]:
         try:
-            m = BookingRequestModel.objects.get(company_id=company_id, id=booking_id)
+            qs = BookingRequestModel.objects.filter(company_id=company_id, id=booking_id)
+            if for_update:
+                qs = qs.select_for_update()
+            m = qs.first()
+            if not m:
+                return None
             return self._to_domain(m)
         except BookingRequestModel.DoesNotExist:
             return None
@@ -47,8 +52,8 @@ class DjangoBookingRequestRepository(BookingRequestRepository):
     def save(self, booking: BookingRequest) -> None:
         BookingRequestModel.objects.update_or_create(
             id=booking.id,
+            company_id=booking.company_id,
             defaults={
-                "company_id": booking.company_id,
                 "client_name": booking.client_name,
                 "client_phone": str(booking.client_phone),
                 "services": booking.services,

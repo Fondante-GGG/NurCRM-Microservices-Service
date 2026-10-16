@@ -37,6 +37,13 @@ class DjangoAppointmentRepository(AppointmentRepository):
         except AppointmentModel.DoesNotExist:
             return None
 
+    def get_by_idempotency_key(self, company_id: uuid.UUID, idempotency_key: str) -> Optional[Appointment]:
+        try:
+            m = AppointmentModel.objects.get(company_id=company_id, idempotency_key=idempotency_key)
+            return self._to_domain(m)
+        except AppointmentModel.DoesNotExist:
+            return None
+
     def list_by_company(
         self,
         company_id: uuid.UUID,
@@ -78,24 +85,36 @@ class DjangoAppointmentRepository(AppointmentRepository):
         return [self._to_domain(m) for m in qs]
 
     def save(self, appt: Appointment) -> None:
-        AppointmentModel.objects.update_or_create(
-            id=appt.id,
-            defaults={
-                "company_id": appt.company_id,
-                "client_id": appt.client_id,
-                "client_name": appt.client_name,
-                "barber_id": appt.barber_id,
-                "services_snapshot": [s.to_dict() for s in appt.services],
-                "start_at": appt.start_at,
-                "end_at": appt.end_at,
-                "price": appt.price.amount,
-                "discount": appt.discount.amount,
-                "status": appt.status,
-                "comment": appt.comment,
-                "version": appt.version,
-                "updated_at": appt.updated_at,
-            },
-        )
+        from django.db import IntegrityError
+        try:
+            AppointmentModel.objects.update_or_create(
+                id=appt.id,
+                company_id=appt.company_id,
+                defaults={
+                    "client_id": appt.client_id,
+                    "client_name": appt.client_name,
+                    "barber_id": appt.barber_id,
+                    "services_snapshot": [s.to_dict() for s in appt.services],
+                    "start_at": appt.start_at,
+                    "end_at": appt.end_at,
+                    "price": appt.price.amount,
+                    "discount": appt.discount.amount,
+                    "status": appt.status,
+                    "comment": appt.comment,
+                    "idempotency_key": appt.idempotency_key,
+                    "version": appt.version,
+                    "updated_at": appt.updated_at,
+                },
+            )
+        except IntegrityError as e:
+            err_str = str(e).lower()
+            if "no_overlap" in err_str or "exclusion" in err_str:
+                raise SlotBusyError("Master slot is already booked for this interval")
+            if "idempotency_key" in err_str:
+                # Concurrent duplicate idempotency key
+                pass
+            else:
+                raise
 
     def delete(self, company_id: uuid.UUID, appt_id: uuid.UUID) -> None:
         AppointmentModel.objects.filter(company_id=company_id, id=appt_id).delete()

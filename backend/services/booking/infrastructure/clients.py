@@ -17,23 +17,14 @@ class HttpClientServiceClient(ClientServiceClientPort):
         )
 
     def find_or_create_client(self, company_id: uuid.UUID, full_name: str, phone: str) -> Dict[str, Any]:
-        try:
-            return self.client.post(
-                "/internal/v1/clients/find-or-create/",
-                json_data={
-                    "company_id": str(company_id),
-                    "full_name": full_name,
-                    "phone": phone,
-                },
-            )
-        except Exception:
-            # Fallback stub for unit/standalone testing
-            return {
-                "id": str(uuid.uuid4()),
+        return self.client.post(
+            "/internal/v1/clients/find-or-create/",
+            json_data={
                 "company_id": str(company_id),
                 "full_name": full_name,
                 "phone": phone,
-            }
+            },
+        )
 
 
 class HttpScheduleServiceClient(ScheduleServiceClientPort):
@@ -74,9 +65,4 @@ class HttpScheduleServiceClient(ScheduleServiceClientPort):
         except Exception as e:
             if "slot_busy" in str(e).lower() or getattr(e, "code", "") == "slot_busy":
                 raise SlotBusyError("Slot is busy")
-            # If standalone test
-            return {
-                "id": str(uuid.uuid4()),
-                "status": "confirmed",
-                "start_at": start_at,
-            }
+            raise

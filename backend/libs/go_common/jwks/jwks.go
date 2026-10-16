@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"math/big"
 	"net/http"
+	"os"
 	"sync"
 	"time"
 
@@ -151,3 +152,57 @@ func (v *KeyValidator) ValidateToken(tokenStr string) (*Claims, error) {
 
 	return claims, nil
 }
+
+type InternalClaims struct {
+	Iss  string `json:"iss"`
+	Sub  string `json:"sub"`
+	Aud  string `json:"aud"`
+	Type string `json:"type"`
+	jwt.RegisteredClaims
+}
+
+func LoadPrivateKey(path string) ([]byte, error) {
+	if path == "" {
+		path = os.Getenv("JWT_PRIVATE_KEY_PATH")
+	}
+	if path == "" {
+		candidates := []string{
+			"/app/keys/jwt_private.pem",
+			"../../keys/jwt_private.pem",
+			"../keys/jwt_private.pem",
+			"keys/jwt_private.pem",
+		}
+		for _, p := range candidates {
+			if _, err := os.Stat(p); err == nil {
+				path = p
+				break
+			}
+		}
+	}
+	if path == "" {
+		return nil, errors.New("jwt_private.pem key file not found")
+	}
+	return os.ReadFile(path)
+}
+
+func CreateInternalToken(senderService, targetService string, privateKeyPEM []byte) (string, error) {
+	key, err := jwt.ParseRSAPrivateKeyFromPEM(privateKeyPEM)
+	if err != nil {
+		return "", err
+	}
+	now := time.Now()
+	claims := InternalClaims{
+		Iss:  "nurcrm-mesh",
+		Sub:  senderService,
+		Aud:  targetService,
+		Type: "internal",
+		RegisteredClaims: jwt.RegisteredClaims{
+			IssuedAt:  jwt.NewNumericDate(now),
+			ExpiresAt: jwt.NewNumericDate(now.Add(5 * time.Minute)),
+		},
+	}
+	token := jwt.NewWithClaims(jwt.SigningMethodRS256, claims)
+	token.Header["kid"] = "nurcrm-default-key"
+	return token.SignedString(key)
+}
+

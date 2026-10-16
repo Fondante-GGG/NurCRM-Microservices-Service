@@ -46,6 +46,25 @@ class CreateAppointmentUseCase:
 
     def execute(self, dto: CreateAppointmentDTO) -> AppointmentDTO:
         with self.uow:
+            # Idempotency check: if appointment with this key exists, return it
+            if dto.idempotency_key:
+                existing = self.uow.appointments.get_by_idempotency_key(dto.company_id, dto.idempotency_key)
+                if existing:
+                    return AppointmentDTO(
+                        id=str(existing.id),
+                        company_id=str(existing.company_id),
+                        client_name=existing.client_name,
+                        barber_id=str(existing.barber_id) if existing.barber_id else None,
+                        services=[s.to_dict() for s in existing.services],
+                        start_at=existing.start_at.isoformat(),
+                        end_at=existing.end_at.isoformat(),
+                        price=existing.price.amount,
+                        discount=existing.discount.amount,
+                        status=existing.status,
+                        comment=existing.comment,
+                        version=existing.version,
+                    )
+
             # 1. Fetch service snapshots from catalog
             if dto.service_ids:
                 services = self.catalog.get_services(dto.company_id, dto.service_ids)
@@ -75,6 +94,7 @@ class CreateAppointmentUseCase:
                 discount=discount_money,
                 comment=dto.comment,
                 status=dto.status,
+                idempotency_key=dto.idempotency_key,
             )
 
             # 3. Conflict resolution / Overlap check (only if barber is specified)

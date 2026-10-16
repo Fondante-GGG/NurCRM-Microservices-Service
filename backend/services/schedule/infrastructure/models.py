@@ -15,6 +15,7 @@ class AppointmentModel(models.Model):
     discount = models.DecimalField(max_digits=12, decimal_places=2, default=0.00)
     status = models.CharField(max_length=32, default="booked", db_index=True)
     comment = models.TextField(blank=True, default="")
+    idempotency_key = models.CharField(max_length=128, null=True, blank=True, unique=True, db_index=True)
     version = models.IntegerField(default=1)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

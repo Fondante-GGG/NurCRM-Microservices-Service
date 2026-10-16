@@ -2,6 +2,9 @@ import uuid
 from django.db import models
 
 
+from django.contrib.postgres.fields import ArrayField
+
+
 class ServiceCategoryModel(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     company_id = models.UUIDField(db_index=True)
@@ -24,7 +27,7 @@ class ServiceModel(models.Model):
     name = models.CharField(max_length=255)
     price = models.DecimalField(max_digits=12, decimal_places=2, default=0.00)
     time_minutes = models.IntegerField(default=30)
-    barbers = models.JSONField(default=list, blank=True)
+    barbers = ArrayField(models.UUIDField(), default=list, blank=True)
     is_active = models.BooleanField(default=True)
     version = models.IntegerField(default=1)
     created_at = models.DateTimeField(auto_now_add=True)
