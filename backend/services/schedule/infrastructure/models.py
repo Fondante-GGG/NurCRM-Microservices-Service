@@ -7,7 +7,7 @@ class AppointmentModel(models.Model):
     company_id = models.UUIDField(db_index=True)
     client_id = models.UUIDField(null=True, blank=True, db_index=True)
     client_name = models.CharField(max_length=255)
-    barber_id = models.UUIDField(db_index=True)
+    barber_id = models.UUIDField(null=True, blank=True, db_index=True)
     services_snapshot = models.JSONField(default=list)
     start_at = models.DateTimeField(db_index=True)
     end_at = models.DateTimeField(db_index=True)
@@ -37,6 +37,23 @@ class MasterScheduleModel(models.Model):
     class Meta:
         db_table = '"schedule"."master_schedules"'
         unique_together = ("company_id", "master_id", "day_of_week")
+
+
+class MasterShiftModel(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    company_id = models.UUIDField(db_index=True)
+    master_id = models.UUIDField(db_index=True)
+    date = models.DateField(db_index=True)
+    fact = models.CharField(max_length=32, default="planned")  # planned | worked | missed | busy
+    start_time = models.TimeField(default="09:00:00")
+    end_time = models.TimeField(default="21:00:00")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = '"schedule"."master_shifts"'
+        verbose_name = "Смена специалиста"
+        verbose_name_plural = "Смены специалистов"
 
 
 class OutboxModel(models.Model):

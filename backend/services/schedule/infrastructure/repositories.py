@@ -59,11 +59,13 @@ class DjangoAppointmentRepository(AppointmentRepository):
     def get_overlapping(
         self,
         company_id: uuid.UUID,
-        barber_id: uuid.UUID,
+        barber_id: Optional[uuid.UUID],
         start_at: datetime,
         end_at: datetime,
         exclude_id: Optional[uuid.UUID] = None,
     ) -> List[Appointment]:
+        if not barber_id:
+            return []
         qs = AppointmentModel.objects.filter(
             company_id=company_id,
             barber_id=barber_id,

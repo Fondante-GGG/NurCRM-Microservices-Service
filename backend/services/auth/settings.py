@@ -10,6 +10,7 @@ ALLOWED_HOSTS = ["*"]
 INSTALLED_APPS = [
     "django.contrib.contenttypes",
     "django.contrib.auth",
+    "django.contrib.postgres",
     "rest_framework",
     "backend.services.auth.infrastructure",
 ]
@@ -20,6 +21,7 @@ MIDDLEWARE = [
 ]
 
 ROOT_URLCONF = "backend.services.auth.interface.urls"
+APPEND_SLASH = False
 
 DATABASES = {
     "default": {

@@ -38,6 +38,7 @@ class JWTUser:
     permissions: List[str] = field(default_factory=list)
     sid: Optional[str] = None
     email: Optional[str] = None
+    impersonated_by: Optional[str] = None
     is_authenticated: bool = True
 
     def has_perm(self, perm: str) -> bool:
@@ -56,11 +57,14 @@ class KeyManager:
 
     @classmethod
     def initialize_keys(cls, private_pem_path: Optional[str] = None, public_pem_path: Optional[str] = None) -> None:
-        if private_pem_path and os.path.exists(private_pem_path):
-            with open(private_pem_path, "r") as f:
+        priv_path = private_pem_path or os.getenv("JWT_PRIVATE_KEY_PATH") or os.path.join(os.path.dirname(__file__), "..", "..", "keys", "jwt_private.pem")
+        pub_path = public_pem_path or os.getenv("JWT_PUBLIC_KEY_PATH") or os.path.join(os.path.dirname(__file__), "..", "..", "keys", "jwt_public.pem")
+
+        if priv_path and os.path.exists(priv_path):
+            with open(priv_path, "r") as f:
                 cls._private_key_pem = f.read()
-        if public_pem_path and os.path.exists(public_pem_path):
-            with open(public_pem_path, "r") as f:
+        if pub_path and os.path.exists(pub_path):
+            with open(pub_path, "r") as f:
                 cls._public_key_pem = f.read()
 
         if not cls._private_key_pem or not cls._public_key_pem:
@@ -132,6 +136,7 @@ def create_access_token(
     permissions: List[str],
     sid: Optional[str] = None,
     email: Optional[str] = None,
+    impersonated_by: Optional[str] = None,
     expires_in_minutes: int = 15,
 ) -> str:
     now = int(time.time())
@@ -142,6 +147,7 @@ def create_access_token(
         "permissions": permissions,
         "sid": sid or str(uuid.uuid4()),
         "email": email or "",
+        "impersonated_by": impersonated_by,
         "iat": now,
         "exp": now + (expires_in_minutes * 60),
     }
@@ -196,6 +202,7 @@ def verify_token(token: str) -> JWTUser:
         permissions=payload.get("permissions", []),
         sid=payload.get("sid"),
         email=payload.get("email"),
+        impersonated_by=payload.get("impersonated_by"),
     )
 
 

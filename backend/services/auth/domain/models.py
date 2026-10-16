@@ -15,12 +15,13 @@ class Role:
     OWNER = "owner"
     ADMIN = "admin"
     MASTER = "master"
+    SUPPORT = "support"
 
-    CHOICES = [OWNER, ADMIN, MASTER]
+    CHOICES = [OWNER, ADMIN, MASTER, SUPPORT]
 
     @classmethod
     def default_permissions(cls, role: str) -> List[str]:
-        if role == cls.OWNER:
+        if role in (cls.OWNER, cls.SUPPORT):
             return Permissions.ALL
         elif role == cls.ADMIN:
             return [
@@ -42,13 +43,53 @@ class Role:
 class Company(AggregateRoot):
     name: str = ""
     slug: str = ""
-    industry: str = "Услуги"
+    industry: Optional[str] = None  # barber | beauty | procedure | massage
+    intake: str = "schedule"        # schedule | flow
     sector: str = "Услуги"
+    legal_name: str = ""
+    inn: str = ""
+    okpo: str = ""
+    account: str = ""
+    bik: str = ""
+    address: str = ""
+    phones: List[str] = field(default_factory=list)
+    blocked: bool = False
+    plan: str = "free"             # free | trial | paid
+    temp_access_until: Optional[datetime] = None
     appointment_work_start: time = field(default_factory=lambda: time(9, 0))
     appointment_work_end: time = field(default_factory=lambda: time(21, 0))
     subscription_plan: str = "Стандарт"
     created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+@dataclass
+class Branch(Entity):
+    name: str = ""
+    address: str = ""
+    is_active: bool = True
+    created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+@dataclass
+class SupportTicket(AggregateRoot):
+    topic: str = ""          # industry | setup | bug | other
+    message: str = ""
+    contact: str = ""
+    share_access: bool = False
+    status: str = "new"      # new | in_progress | done
+    assignee: str = ""
+    reply: str = ""
+    created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+@dataclass
+class SupportLog(Entity):
+    at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    agent: str = ""
+    action: str = ""
 
 
 @dataclass

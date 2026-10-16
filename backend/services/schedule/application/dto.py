@@ -17,9 +17,9 @@ class ServiceItemInputDTO:
 class CreateAppointmentDTO:
     company_id: uuid.UUID
     client_name: str
-    barber_id: uuid.UUID
-    start_at: datetime
-    service_ids: List[uuid.UUID]
+    barber_id: Optional[uuid.UUID] = None
+    start_at: Optional[datetime] = None
+    service_ids: Optional[List[uuid.UUID]] = None
     client_id: Optional[uuid.UUID] = None
     discount: Optional[Decimal] = None
     comment: str = ""
@@ -34,6 +34,7 @@ class UpdateAppointmentDTO:
     client_name: Optional[str] = None
     discount: Optional[Decimal] = None
     comment: Optional[str] = None
+    status: Optional[str] = None
     expected_version: Optional[int] = None
 
 
@@ -43,7 +44,7 @@ class AppointmentDTO:
     company_id: str
     client_id: Optional[str]
     client_name: str
-    barber_id: str
+    barber_id: Optional[str]
     services: List[Dict[str, Any]]
     start_at: str
     end_at: str

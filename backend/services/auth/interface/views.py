@@ -46,6 +46,10 @@ class LoginView(APIView):
             return Response({
                 "access": result.access_token,
                 "refresh": result.refresh_token,
+                "access_token": result.access_token,
+                "refresh_token": result.refresh_token,
+                "company_id": result.company_id,
+                "user_id": result.user_id,
                 "user": {
                     "id": result.user_id,
                     "company_id": result.company_id,

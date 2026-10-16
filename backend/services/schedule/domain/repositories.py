@@ -21,7 +21,7 @@ class AppointmentRepository(Protocol):
     def get_overlapping(
         self,
         company_id: uuid.UUID,
-        barber_id: uuid.UUID,
+        barber_id: Optional[uuid.UUID],
         start_at: datetime,
         end_at: datetime,
         exclude_id: Optional[uuid.UUID] = None,

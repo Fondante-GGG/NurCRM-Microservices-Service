@@ -47,35 +47,48 @@ class CreateAppointmentUseCase:
     def execute(self, dto: CreateAppointmentDTO) -> AppointmentDTO:
         with self.uow:
             # 1. Fetch service snapshots from catalog
-            services = self.catalog.get_services(dto.company_id, dto.service_ids)
-            if not services:
-                raise ValidationError("No valid services found for appointment")
+            if dto.service_ids:
+                services = self.catalog.get_services(dto.company_id, dto.service_ids)
+                if not services:
+                    raise ValidationError("No valid services found for appointment")
+            else:
+                # Default flow queue walk-in consultation
+                services = [
+                    ServiceSnapshot(
+                        service_id=uuid.uuid4(),
+                        name="Приём",
+                        price=Money(Decimal("0.00")),
+                        time_minutes=30,
+                    )
+                ]
 
             # 2. Build appointment aggregate to compute duration & end_at
             discount_money = Money(dto.discount) if dto.discount is not None else None
+            start_at = dto.start_at or datetime.now(timezone.utc)
             appt = Appointment.create(
                 company_id=dto.company_id,
                 client_id=dto.client_id,
                 client_name=dto.client_name,
                 barber_id=dto.barber_id,
                 services=services,
-                start_at=dto.start_at,
+                start_at=start_at,
                 discount=discount_money,
                 comment=dto.comment,
                 status=dto.status,
             )
 
-            # 3. Conflict resolution / Overlap check
-            overlapping = self.uow.appointments.get_overlapping(
-                company_id=dto.company_id,
-                barber_id=dto.barber_id,
-                start_at=appt.start_at,
-                end_at=appt.end_at,
-            )
-            if overlapping:
-                raise SlotBusyError(
-                    f"Master is already booked between {overlapping[0].start_at.isoformat()} and {overlapping[0].end_at.isoformat()}"
+            # 3. Conflict resolution / Overlap check (only if barber is specified)
+            if dto.barber_id:
+                overlapping = self.uow.appointments.get_overlapping(
+                    company_id=dto.company_id,
+                    barber_id=dto.barber_id,
+                    start_at=appt.start_at,
+                    end_at=appt.end_at,
                 )
+                if overlapping:
+                    raise SlotBusyError(
+                        f"Master is already booked between {overlapping[0].start_at.isoformat()} and {overlapping[0].end_at.isoformat()}"
+                    )
 
             # 4. Save
             self.uow.appointments.save(appt)
@@ -88,7 +101,7 @@ class CreateAppointmentUseCase:
                     "appointment_id": str(appt.id),
                     "client_id": str(appt.client_id) if appt.client_id else None,
                     "client_name": appt.client_name,
-                    "barber_id": str(appt.barber_id),
+                    "barber_id": str(appt.barber_id) if appt.barber_id else None,
                     "start_at": appt.start_at.isoformat(),
                     "end_at": appt.end_at.isoformat(),
                     "price": str(appt.price.amount),
@@ -104,7 +117,7 @@ class CreateAppointmentUseCase:
                 company_id=str(appt.company_id),
                 client_id=str(appt.client_id) if appt.client_id else None,
                 client_name=appt.client_name,
-                barber_id=str(appt.barber_id),
+                barber_id=str(appt.barber_id) if appt.barber_id else None,
                 services=[s.to_dict() for s in appt.services],
                 start_at=appt.start_at.isoformat(),
                 end_at=appt.end_at.isoformat(),
@@ -157,7 +170,10 @@ class UpdateAppointmentUseCase:
             if barber_changed:
                 appt.barber_id = dto.barber_id  # type: ignore
 
-            if start_at_changed or services_changed or barber_changed:
+            if dto.status is not None:
+                appt.transition_status(dto.status)
+
+            if (start_at_changed or services_changed or barber_changed) and appt.barber_id:
                 overlapping = self.uow.appointments.get_overlapping(
                     company_id=company_id,
                     barber_id=appt.barber_id,
@@ -177,7 +193,7 @@ class UpdateAppointmentUseCase:
                 company_id=str(company_id),
                 data={
                     "appointment_id": str(appt.id),
-                    "barber_id": str(appt.barber_id),
+                    "barber_id": str(appt.barber_id) if appt.barber_id else None,
                     "start_at": appt.start_at.isoformat(),
                     "end_at": appt.end_at.isoformat(),
                     "status": appt.status,
@@ -192,7 +208,7 @@ class UpdateAppointmentUseCase:
                 company_id=str(appt.company_id),
                 client_id=str(appt.client_id) if appt.client_id else None,
                 client_name=appt.client_name,
-                barber_id=str(appt.barber_id),
+                barber_id=str(appt.barber_id) if appt.barber_id else None,
                 services=[s.to_dict() for s in appt.services],
                 start_at=appt.start_at.isoformat(),
                 end_at=appt.end_at.isoformat(),
@@ -232,7 +248,7 @@ class ChangeAppointmentStatusUseCase:
                 data={
                     "appointment_id": str(appt.id),
                     "company_id": str(appt.company_id),
-                    "barber_id": str(appt.barber_id),
+                    "barber_id": str(appt.barber_id) if appt.barber_id else None,
                     "price": str(appt.price.amount),
                     "services": [s.to_dict() for s in appt.services],
                     "status": appt.status,
@@ -247,7 +263,7 @@ class ChangeAppointmentStatusUseCase:
                 company_id=str(appt.company_id),
                 client_id=str(appt.client_id) if appt.client_id else None,
                 client_name=appt.client_name,
-                barber_id=str(appt.barber_id),
+                barber_id=str(appt.barber_id) if appt.barber_id else None,
                 services=[s.to_dict() for s in appt.services],
                 start_at=appt.start_at.isoformat(),
                 end_at=appt.end_at.isoformat(),

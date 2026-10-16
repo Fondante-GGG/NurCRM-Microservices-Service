@@ -20,6 +20,7 @@ from backend.services.schedule.application.use_cases import (
 from backend.services.schedule.infrastructure.uow import DjangoScheduleUnitOfWork
 from backend.services.schedule.infrastructure.repositories import DjangoAppointmentRepository
 from backend.services.schedule.infrastructure.catalog_client import HttpCatalogClient
+from backend.services.schedule.infrastructure.models import MasterShiftModel
 
 
 def get_current_user_from_request(request):
@@ -74,11 +75,14 @@ class AppointmentListCreateView(APIView):
                     "id": str(a.id),
                     "client_id": str(a.client_id) if a.client_id else None,
                     "client_name": a.client_name,
-                    "barber": str(a.barber_id),
-                    "barber_id": str(a.barber_id),
+                    "barber": str(a.barber_id) if a.barber_id else None,
+                    "barber_id": str(a.barber_id) if a.barber_id else None,
+                    "staff": str(a.barber_id) if a.barber_id else None,
                     "services": [s.to_dict() for s in a.services],
+                    "start": a.start_at.isoformat(),
                     "start_at": a.start_at.isoformat(),
                     "end_at": a.end_at.isoformat(),
+                    "duration": int((a.end_at - a.start_at).total_seconds() // 60),
                     "price": str(a.price.amount),
                     "discount": str(a.discount.amount),
                     "status": a.status,
@@ -95,12 +99,35 @@ class AppointmentListCreateView(APIView):
     def post(self, request):
         try:
             user = get_current_user_from_request(request)
-            data = request.data
-            service_ids = [uuid.UUID(str(s)) for s in data.get("services", [])]
+            data = request.data or {}
 
-            start_at = datetime.fromisoformat(data["start_at"])
-            client_id = uuid.UUID(data["client_id"]) if data.get("client_id") else None
-            barber_id = uuid.UUID(data.get("barber") or data.get("barber_id"))
+            # 1. Services
+            service_ids = []
+            for s in data.get("services", []):
+                if isinstance(s, dict) and "service_id" in s:
+                    service_ids.append(uuid.UUID(str(s["service_id"])))
+                elif isinstance(s, dict) and "id" in s:
+                    service_ids.append(uuid.UUID(str(s["id"])))
+                else:
+                    service_ids.append(uuid.UUID(str(s)))
+
+            # 2. Start time (if flow or not provided, defaults to now())
+            start_raw = data.get("start") or data.get("start_at")
+            if start_raw:
+                start_at = datetime.fromisoformat(str(start_raw).replace("Z", "+00:00"))
+            else:
+                start_at = datetime.now(timezone.utc)
+
+            client_id = uuid.UUID(str(data["client_id"])) if data.get("client_id") else None
+
+            # 3. Staff / Barber (can be empty in flow queue)
+            barber_raw = data.get("staff") or data.get("barber") or data.get("barber_id")
+            barber_id = uuid.UUID(str(barber_raw)) if barber_raw else None
+
+            # 4. Status (flow default pending, otherwise booked)
+            default_status = "pending" if barber_id is None else "booked"
+            status_val = data.get("status") or default_status
+
             disc = Decimal(str(data["discount"])) if "discount" in data and data["discount"] is not None else None
 
             dto = CreateAppointmentDTO(
@@ -112,7 +139,7 @@ class AppointmentListCreateView(APIView):
                 client_id=client_id,
                 discount=disc,
                 comment=data.get("comment", ""),
-                status=data.get("status", "booked"),
+                status=status_val,
             )
             uow = DjangoScheduleUnitOfWork()
             catalog_client = HttpCatalogClient()
@@ -121,8 +148,11 @@ class AppointmentListCreateView(APIView):
                 "id": res.id,
                 "client_id": res.client_id,
                 "client_name": res.client_name,
+                "staff": res.barber_id,
                 "barber_id": res.barber_id,
+                "barber": res.barber_id,
                 "services": res.services,
+                "start": res.start_at,
                 "start_at": res.start_at,
                 "end_at": res.end_at,
                 "price": str(res.price),
@@ -145,10 +175,14 @@ class AppointmentDetailView(APIView):
                 "id": str(a.id),
                 "client_id": str(a.client_id) if a.client_id else None,
                 "client_name": a.client_name,
-                "barber_id": str(a.barber_id),
+                "staff": str(a.barber_id) if a.barber_id else None,
+                "barber_id": str(a.barber_id) if a.barber_id else None,
+                "barber": str(a.barber_id) if a.barber_id else None,
                 "services": [s.to_dict() for s in a.services],
+                "start": a.start_at.isoformat(),
                 "start_at": a.start_at.isoformat(),
                 "end_at": a.end_at.isoformat(),
+                "duration": int((a.end_at - a.start_at).total_seconds() // 60),
                 "price": str(a.price.amount),
                 "discount": str(a.discount.amount),
                 "status": a.status,
@@ -161,45 +195,55 @@ class AppointmentDetailView(APIView):
     def patch(self, request, appt_id):
         try:
             user = get_current_user_from_request(request)
-            data = request.data
+            data = request.data or {}
             if_match = request.headers.get("If-Match")
             expected_ver = int(if_match) if if_match and if_match.isdigit() else data.get("expected_version")
 
             uow = DjangoScheduleUnitOfWork()
 
-            # Check if this is a simple status transition
-            if "status" in data and len(data) <= 2:
-                res = ChangeAppointmentStatusUseCase(uow).execute(
-                    company_id=uuid.UUID(user.company_id),
-                    appt_id=uuid.UUID(str(appt_id)),
-                    new_status=data["status"],
-                    expected_version=expected_ver,
-                )
-            else:
-                service_ids = [uuid.UUID(str(s)) for s in data["services"]] if "services" in data else None
-                start_at = datetime.fromisoformat(data["start_at"]) if "start_at" in data else None
-                barber_id = uuid.UUID(data["barber_id"]) if "barber_id" in data else None
-                disc = Decimal(str(data["discount"])) if "discount" in data else None
+            barber_raw = data.get("staff") or data.get("barber_id") or data.get("barber")
+            barber_id = uuid.UUID(str(barber_raw)) if barber_raw else None
+            new_status = data.get("status")
 
-                dto = UpdateAppointmentDTO(
-                    start_at=start_at,
-                    barber_id=barber_id,
-                    service_ids=service_ids,
-                    client_name=data.get("client_name"),
-                    discount=disc,
-                    comment=data.get("comment"),
-                    expected_version=expected_ver,
-                )
-                catalog_client = HttpCatalogClient()
-                res = UpdateAppointmentUseCase(uow, catalog_client).execute(
-                    company_id=uuid.UUID(user.company_id),
-                    appt_id=uuid.UUID(str(appt_id)),
-                    dto=dto,
-                )
+            service_ids = None
+            if "services" in data:
+                service_ids = []
+                for s in data["services"]:
+                    if isinstance(s, dict) and "service_id" in s:
+                        service_ids.append(uuid.UUID(str(s["service_id"])))
+                    elif isinstance(s, dict) and "id" in s:
+                        service_ids.append(uuid.UUID(str(s["id"])))
+                    else:
+                        service_ids.append(uuid.UUID(str(s)))
+
+            start_raw = data.get("start") or data.get("start_at")
+            start_at = datetime.fromisoformat(str(start_raw).replace("Z", "+00:00")) if start_raw else None
+            disc = Decimal(str(data["discount"])) if "discount" in data and data["discount"] is not None else None
+
+            dto = UpdateAppointmentDTO(
+                start_at=start_at,
+                barber_id=barber_id,
+                service_ids=service_ids,
+                client_name=data.get("client_name"),
+                discount=disc,
+                comment=data.get("comment"),
+                status=new_status,
+                expected_version=expected_ver,
+            )
+            catalog_client = HttpCatalogClient()
+            res = UpdateAppointmentUseCase(uow, catalog_client).execute(
+                company_id=uuid.UUID(user.company_id),
+                appt_id=uuid.UUID(str(appt_id)),
+                dto=dto,
+            )
 
             return Response({
                 "id": res.id,
                 "status": res.status,
+                "staff": res.barber_id,
+                "barber_id": res.barber_id,
+                "barber": res.barber_id,
+                "start": res.start_at,
                 "start_at": res.start_at,
                 "end_at": res.end_at,
                 "price": str(res.price),
@@ -218,6 +262,151 @@ class AppointmentDetailView(APIView):
                 new_status="canceled",
             )
             return Response(status=204)
+        except CRMException as e:
+            return Response(error_response(e.code, e.message), status=e.status_code)
+
+
+VALID_SHIFT_FACTS = ["planned", "worked", "missed", "busy"]
+
+
+class ShiftListCreateView(APIView):
+    def get(self, request):
+        try:
+            user = get_current_user_from_request(request)
+            qs = MasterShiftModel.objects.filter(company_id=uuid.UUID(user.company_id))
+
+            master_id = request.query_params.get("master_id") or request.query_params.get("staff")
+            if master_id:
+                qs = qs.filter(master_id=uuid.UUID(master_id))
+
+            date_param = request.query_params.get("date")
+            if date_param:
+                qs = qs.filter(date=date.fromisoformat(date_param))
+
+            fact_param = request.query_params.get("fact")
+            if fact_param:
+                qs = qs.filter(fact=fact_param)
+
+            shifts = [
+                {
+                    "id": str(s.id),
+                    "company_id": str(s.company_id),
+                    "master_id": str(s.master_id),
+                    "staff": str(s.master_id),
+                    "date": s.date.isoformat(),
+                    "fact": s.fact,
+                    "start_time": str(s.start_time),
+                    "end_time": str(s.end_time),
+                }
+                for s in qs.order_by("date", "start_time")
+            ]
+            return Response(shifts)
+        except CRMException as e:
+            return Response(error_response(e.code, e.message), status=e.status_code)
+
+    def post(self, request):
+        try:
+            user = get_current_user_from_request(request)
+            data = request.data or {}
+
+            master_raw = data.get("master_id") or data.get("staff")
+            if not master_raw:
+                return Response(error_response("validation_error", "master_id or staff is required"), status=400)
+            master_id = uuid.UUID(str(master_raw))
+
+            date_str = data.get("date")
+            if not date_str:
+                shift_date = date.today()
+            else:
+                shift_date = date.fromisoformat(str(date_str))
+
+            fact = data.get("fact", "planned")
+            if fact not in VALID_SHIFT_FACTS:
+                return Response(error_response("invalid_fact", f"fact must be one of {VALID_SHIFT_FACTS}"), status=400)
+
+            start_time = data.get("start_time", "09:00:00")
+            end_time = data.get("end_time", "21:00:00")
+
+            shift = MasterShiftModel.objects.create(
+                company_id=uuid.UUID(user.company_id),
+                master_id=master_id,
+                date=shift_date,
+                fact=fact,
+                start_time=start_time,
+                end_time=end_time,
+            )
+
+            return Response({
+                "id": str(shift.id),
+                "company_id": str(shift.company_id),
+                "master_id": str(shift.master_id),
+                "staff": str(shift.master_id),
+                "date": shift.date.isoformat(),
+                "fact": shift.fact,
+                "start_time": str(shift.start_time),
+                "end_time": str(shift.end_time),
+            }, status=201)
+        except CRMException as e:
+            return Response(error_response(e.code, e.message), status=e.status_code)
+
+
+class ShiftDetailView(APIView):
+    def get(self, request, shift_id):
+        try:
+            user = get_current_user_from_request(request)
+            try:
+                shift = MasterShiftModel.objects.get(id=uuid.UUID(str(shift_id)), company_id=uuid.UUID(user.company_id))
+            except MasterShiftModel.DoesNotExist:
+                return Response(error_response("not_found", "Shift not found"), status=404)
+
+            return Response({
+                "id": str(shift.id),
+                "company_id": str(shift.company_id),
+                "master_id": str(shift.master_id),
+                "staff": str(shift.master_id),
+                "date": shift.date.isoformat(),
+                "fact": shift.fact,
+                "start_time": str(shift.start_time),
+                "end_time": str(shift.end_time),
+            })
+        except CRMException as e:
+            return Response(error_response(e.code, e.message), status=e.status_code)
+
+    def patch(self, request, shift_id):
+        try:
+            user = get_current_user_from_request(request)
+            try:
+                shift = MasterShiftModel.objects.get(id=uuid.UUID(str(shift_id)), company_id=uuid.UUID(user.company_id))
+            except MasterShiftModel.DoesNotExist:
+                return Response(error_response("not_found", "Shift not found"), status=404)
+
+            data = request.data or {}
+            if "fact" in data:
+                fact = data["fact"]
+                if fact not in VALID_SHIFT_FACTS:
+                    return Response(
+                        error_response("invalid_fact", f"fact must be one of {VALID_SHIFT_FACTS}"),
+                        status=400,
+                    )
+                shift.fact = fact
+
+            if "start_time" in data:
+                shift.start_time = data["start_time"]
+            if "end_time" in data:
+                shift.end_time = data["end_time"]
+
+            shift.save()
+
+            return Response({
+                "id": str(shift.id),
+                "company_id": str(shift.company_id),
+                "master_id": str(shift.master_id),
+                "staff": str(shift.master_id),
+                "date": shift.date.isoformat(),
+                "fact": shift.fact,
+                "start_time": str(shift.start_time),
+                "end_time": str(shift.end_time),
+            })
         except CRMException as e:
             return Response(error_response(e.code, e.message), status=e.status_code)
 

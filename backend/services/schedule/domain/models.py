@@ -15,9 +15,12 @@ class AppointmentStatus:
     COMPLETED = "completed"
     CANCELED = "canceled"
     NO_SHOW = "no_show"
+    PENDING = "pending"  # flow queue: в очереди
+    ARRIVED = "arrived"  # flow queue: принимают
+    PAID = "paid"        # flow queue: принят, визит закрыт
 
-    ACTIVE_STATUSES = [BOOKED, CONFIRMED, COMPLETED]
-    ALL = [BOOKED, CONFIRMED, COMPLETED, CANCELED, NO_SHOW]
+    ACTIVE_STATUSES = [BOOKED, CONFIRMED, COMPLETED, PENDING, ARRIVED, PAID]
+    ALL = [BOOKED, CONFIRMED, COMPLETED, CANCELED, NO_SHOW, PENDING, ARRIVED, PAID]
 
 
 @dataclass
@@ -49,7 +52,7 @@ class ServiceSnapshot:
 class Appointment(AggregateRoot):
     client_id: Optional[uuid.UUID] = None
     client_name: str = ""
-    barber_id: uuid.UUID = field(default_factory=uuid.uuid4)
+    barber_id: Optional[uuid.UUID] = None
     services: List[ServiceSnapshot] = field(default_factory=list)
     start_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     end_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
@@ -69,7 +72,7 @@ class Appointment(AggregateRoot):
         cls,
         company_id: uuid.UUID,
         client_name: str,
-        barber_id: uuid.UUID,
+        barber_id: Optional[uuid.UUID],
         services: List[ServiceSnapshot],
         start_at: datetime,
         client_id: Optional[uuid.UUID] = None,
@@ -106,7 +109,7 @@ class Appointment(AggregateRoot):
         if self.status == new_status:
             return
 
-        if self.status in [AppointmentStatus.COMPLETED, AppointmentStatus.CANCELED, AppointmentStatus.NO_SHOW]:
+        if self.status in [AppointmentStatus.COMPLETED, AppointmentStatus.CANCELED, AppointmentStatus.NO_SHOW, AppointmentStatus.PAID]:
             raise ConflictError(f"Cannot change status from terminal status {self.status} to {new_status}")
 
         if new_status not in AppointmentStatus.ALL:
