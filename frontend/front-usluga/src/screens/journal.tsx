@@ -207,8 +207,9 @@ function AppointmentForm({ appt, draft, setDraft, clientQuery, setClientQuery, n
   const master = db.staff.find((s) => s.id === draft.staffId);
   const masterServices = db.services.filter((s) => s.active && (master?.serviceIds.includes(s.id) ?? true));
   const price = (id: string) => {
-    const s = db.services.find((x) => x.id === id)!;
-    return s.pricesByPosition[master?.positionId ?? ""] ?? s.price;
+    const s = db.services.find((x) => x.id === id);
+    if (!s) return 0;
+    return s.pricesByPosition?.[master?.positionId ?? ""] ?? s.price ?? 0;
   };
   const duration = draft.serviceIds.reduce((sum, id) => sum + (db.services.find((s) => s.id === id)?.duration ?? 0), 0);
   const total = draft.serviceIds.reduce((sum, id) => sum + price(id), 0);

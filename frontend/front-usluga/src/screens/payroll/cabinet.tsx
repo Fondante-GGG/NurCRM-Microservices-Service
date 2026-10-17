@@ -31,11 +31,36 @@ export function CabinetTab() {
     const future = db.appointments.filter((a) => a.staffId === staffId && a.start > `${today}T23:59` && a.start.startsWith(period) && (a.status === "pending" || a.status === "confirmed"));
     const pos = me?.positionId ?? "";
     const visits: Visit[] = future.map((a) => {
-      const lines = a.serviceIds.map((id) => { const s = db.services.find((x) => x.id === id)!; return { kind: s.addon ? "addon" as const : "service" as const, refId: s.id, name: s.name, price: s.pricesByPosition[pos] ?? s.price, qty: 1, discount: 0, discountAtExpense: s.discountAtExpense, materialsCost: s.materialsCost }; });
+      const lines = (a.serviceIds || []).map((id) => {
+        const s = (db.services || []).find((x) => x.id === id);
+        if (!s) {
+          return { kind: "service" as const, refId: id, name: "Услуга", price: 0, qty: 1, discount: 0, discountAtExpense: "salon" as const, materialsCost: 0 };
+        }
+        const prices = s.pricesByPosition || {};
+        return {
+          kind: s.addon ? ("addon" as const) : ("service" as const),
+          refId: s.id,
+          name: s.name,
+          price: prices[pos] ?? s.price ?? 0,
+          qty: 1,
+          discount: 0,
+          discountAtExpense: s.discountAtExpense || "salon",
+          materialsCost: s.materialsCost || 0,
+        };
+      });
       const total = lines.reduce((s, l) => s + l.price, 0);
       return { id: `f-${a.id}`, appointmentId: a.id, branchId: a.branchId, staffId, clientId: a.clientId, closedAt: a.start, closedById: null, lines, tip: 0, tipChannel: "direct" as const, payment: { cash: total, card: 0, balance: 0 }, total, refundedAt: null, refundAmount: 0 };
     });
-    return computeAccruals({ period, staff: db.staff.filter((s) => s.id === staffId), schemes: db.schemes, services: db.services, visits: [...db.visits.filter((v) => v.staffId === staffId), ...visits], appointments: db.appointments, adjustments: db.adjustments, shifts: db.shifts }).reduce((s, a) => s + a.amount, 0);
+    return computeAccruals({
+      period,
+      staff: (db.staff || []).filter((s) => s.id === staffId),
+      schemes: db.schemes || [],
+      services: db.services || [],
+      visits: [...(db.visits || []).filter((v) => v.staffId === staffId), ...visits],
+      appointments: db.appointments || [],
+      adjustments: db.adjustments || [],
+      shifts: db.shifts || [],
+    }).reduce((s, a) => s + (a.amount || 0), 0);
   }, [db, staffId, today, period, me]);
 
   const scheme = db.schemes.find((s) => s.id === me?.schemeId);

@@ -5,8 +5,8 @@ import { setSession } from "@/lib/session";
 // Браузер шлёт логин и пароль сюда, а не напрямую на сервер NurCRM:
 // токен остаётся в httpOnly-cookie и в JavaScript страницы не попадает.
 export async function POST(request: Request) {
-  const body = (await request.json().catch(() => ({}))) as { login?: string; password?: string };
-  const loginValue = (body.login ?? "").trim();
+  const body = (await request.json().catch(() => ({}))) as { login?: string; email?: string; password?: string };
+  const loginValue = (body.login ?? body.email ?? "").trim();
   const password = body.password ?? "";
   if (!loginValue || !password) {
     return NextResponse.json({ error: "credentials" }, { status: 400 });

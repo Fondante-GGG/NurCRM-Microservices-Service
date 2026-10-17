@@ -137,19 +137,24 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         let serverAppointments: any[] = [];
         if (apptRes && apptRes.ok) {
           const appts = await apptRes.json().catch(() => null);
-          if (Array.isArray(appts) && appts.length > 0) {
-            serverAppointments = appts.map((a: any) => ({
+          const aList = Array.isArray(appts) ? appts : (appts?.results || appts?.items || []);
+          if (Array.isArray(aList) && aList.length > 0) {
+            serverAppointments = aList.map((a: any) => ({
               id: a.id,
               branchId: a.branch_id || (branchesData[0]?.id ?? "b1"),
-              staffId: a.staff_id || "",
-              clientId: a.client_id || "",
-              start: a.start || new Date().toISOString(),
+              staffId: a.staff_id || a.barber_id || a.barber || "",
+              clientId: a.client_id || a.client || "",
+              start: a.start_at || a.start || new Date().toISOString(),
               duration: a.duration || 30,
-              serviceIds: a.service_ids || [],
+              serviceIds: Array.isArray(a.service_ids) && a.service_ids.length > 0
+                ? a.service_ids
+                : Array.isArray(a.services)
+                ? a.services.map((s: any) => s.service_id || s.id || s)
+                : [],
               status: a.status || "pending",
               source: a.source || "admin",
               createdById: a.created_by_id || null,
-              note: a.note || "",
+              note: a.note || a.comment || "",
               visitId: a.visit_id || null,
             }));
           }
@@ -158,8 +163,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         let serverCategories: any[] = [];
         if (catRes && catRes.ok) {
           const cats = await catRes.json().catch(() => null);
-          if (Array.isArray(cats) && cats.length > 0) {
-            serverCategories = cats.map((c: any) => ({
+          const cList = Array.isArray(cats) ? cats : (cats?.results || cats?.items || []);
+          if (Array.isArray(cList) && cList.length > 0) {
+            serverCategories = cList.map((c: any) => ({
               id: c.id,
               name: c.name,
             }));

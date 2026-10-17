@@ -48,9 +48,13 @@ export function SaleScreen() {
   const masters = db.staff.filter((s) => s.role === "master" && s.active && s.branchIds.includes(branch));
 
   function lineFor(serviceId: string, staffId: string): VisitLine {
-    const s = db.services.find((x) => x.id === serviceId)!;
-    const pos = db.staff.find((x) => x.id === staffId)?.positionId ?? "";
-    return { kind: s.addon ? "addon" : "service", refId: s.id, name: s.name, price: s.pricesByPosition[pos] ?? s.price, qty: 1, discount: 0, discountAtExpense: s.discountAtExpense, materialsCost: s.materialsCost };
+    const s = (db.services || []).find((x) => x.id === serviceId);
+    if (!s) {
+      return { kind: "service", refId: serviceId, name: "Услуга", price: 0, qty: 1, discount: 0, discountAtExpense: "salon", materialsCost: 0 };
+    }
+    const pos = (db.staff || []).find((x) => x.id === staffId)?.positionId ?? "";
+    const prices = s.pricesByPosition || {};
+    return { kind: s.addon ? "addon" : "service", refId: s.id, name: s.name, price: prices[pos] ?? s.price ?? 0, qty: 1, discount: 0, discountAtExpense: s.discountAtExpense || "salon", materialsCost: s.materialsCost || 0 };
   }
   function fresh(appt: Appointment | null): Draft {
     const staffId = appt?.staffId ?? masters[0]?.id ?? "";
