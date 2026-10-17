@@ -1,0 +1,108 @@
+@import "tailwindcss";
+
+:root {
+  /* Дизайн-система Nurcrm (канвас «NurMarket — редизайн в стиле Coca») */
+  --ink: #111827;
+  --ink-soft: #667085;
+  --ink-mid: #344054;
+  --paper: #f4f5f7;
+  --card: #ffffff;
+  --line: #e5e7eb;
+  --line-soft: #f2f4f7;
+  --line-strong: #d0d5dd;
+  --primary: #0b2a3c;
+  --primary-deep: #123b52;
+  --primary-soft: #e7eef3;
+  --gold: #ffd600;
+  --gold-soft: #fff7cc;
+  --danger: #c0362c;
+  --positive: #0e7a3a;
+  --positive-soft: #e7f6ec;
+  --warn: #b54708;
+  --warn-soft: #fef3e2;
+  --bad-soft: #fde2e1;
+  --nav: #0b2a3c;
+  --nav-text: #c7d2db;
+  --nav-muted: #7d93a3;
+  --segment: #e4e7ec;
+}
+
+@theme inline {
+  --color-ink: var(--ink);
+  --color-ink-soft: var(--ink-soft);
+  --color-ink-mid: var(--ink-mid);
+  --color-paper: var(--paper);
+  --color-card: var(--card);
+  --color-line: var(--line);
+  --color-line-soft: var(--line-soft);
+  --color-line-strong: var(--line-strong);
+  --color-primary: var(--primary);
+  --color-primary-deep: var(--primary-deep);
+  --color-primary-soft: var(--primary-soft);
+  --color-gold: var(--gold);
+  --color-gold-soft: var(--gold-soft);
+  --color-danger: var(--danger);
+  --color-positive: var(--positive);
+  --color-positive-soft: var(--positive-soft);
+  --color-warn: var(--warn);
+  --color-warn-soft: var(--warn-soft);
+  --color-bad-soft: var(--bad-soft);
+  --color-nav: var(--nav);
+  --color-nav-text: var(--nav-text);
+  --color-nav-muted: var(--nav-muted);
+  --color-segment: var(--segment);
+  --font-sans: var(--font-montserrat);
+}
+
+html {
+  overflow-y: scroll; /* полоса прокрутки всегда есть: содержимое не прыгает влево-вправо */
+  font-family: var(--font-montserrat), system-ui, sans-serif;
+}
+
+body {
+  background: var(--paper);
+  color: var(--ink);
+  -webkit-tap-highlight-color: transparent;
+}
+
+button, a, input, select, label { touch-action: manipulation; }
+h1, h2, h3 { text-wrap: balance; }
+select { background-color: var(--card); color: var(--ink); }
+
+:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation: none !important;
+    transition: none !important;
+  }
+}
+
+/* Движение: панели, фон, страницы, кнопки. Отключается при prefers-reduced-motion выше. */
+@keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes fade-out { from { opacity: 1; } to { opacity: 0; } }
+@keyframes slide-in-right { from { transform: translateX(40px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+@keyframes slide-out-right { from { transform: translateX(0); opacity: 1; } to { transform: translateX(40px); opacity: 0; } }
+@keyframes slide-in-left { from { transform: translateX(-40px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+@keyframes slide-out-left { from { transform: translateX(0); opacity: 1; } to { transform: translateX(-40px); opacity: 0; } }
+@keyframes rise { from { transform: translateY(8px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+@keyframes pop { 0% { transform: scale(0.96); opacity: 0; } 60% { transform: scale(1.01); opacity: 1; } 100% { transform: scale(1); } }
+
+.anim-fade-in { animation: fade-in 220ms ease-out backwards; }
+.anim-fade-out { animation: fade-out 180ms ease-in both; }
+.anim-slide-in-right { animation: slide-in-right 260ms cubic-bezier(0.22, 1, 0.36, 1) both; }
+.anim-slide-out-right { animation: slide-out-right 200ms cubic-bezier(0.4, 0, 1, 1) both; }
+.anim-slide-in-left { animation: slide-in-left 260ms cubic-bezier(0.22, 1, 0.36, 1) both; }
+.anim-slide-out-left { animation: slide-out-left 200ms cubic-bezier(0.4, 0, 1, 1) both; }
+.anim-rise { animation: rise 260ms cubic-bezier(0.22, 1, 0.36, 1) backwards; }
+.anim-pop { animation: pop 320ms cubic-bezier(0.22, 1, 0.36, 1) backwards; }
+
+.spring { transition-timing-function: cubic-bezier(0.34, 1.56, 0.64, 1); }
+
+.press { transition: transform 120ms ease, background-color 160ms ease, border-color 160ms ease, box-shadow 160ms ease, color 160ms ease; }
+.press:active:not(:disabled) { transform: scale(0.97); }
+
+tbody tr { transition: background-color 160ms ease; }
