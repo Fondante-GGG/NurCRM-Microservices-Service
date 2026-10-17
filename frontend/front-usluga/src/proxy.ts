@@ -22,7 +22,7 @@ export function proxy(request: NextRequest) {
   const home = isSection(section) ? `/${section}` : "/razdel";
 
   if (!token) {
-    if (pathname === "/login") return NextResponse.next();
+    if (pathname === "/login" || pathname === "/") return NextResponse.next();
     return NextResponse.redirect(new URL("/login", request.url));
   }
 
