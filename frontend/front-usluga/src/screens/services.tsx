@@ -21,9 +21,73 @@ export function ServicesScreen({ addons }: { addons: boolean }) {
   function openNew() {
     setEditing({ id: newId("sv_"), name: "", categoryId: db.categories[0]?.id ?? "", duration: 30, price: 0, pricesByPosition: {}, addon: addons, materialsCost: 0, discountAtExpense: "salon", online: !addons, active: true });
   }
-  function save() {
+  async function save() {
     if (!editing || !editing.name.trim()) return;
-    update((d) => ({ ...d, services: d.services.some((s) => s.id === editing.id) ? d.services.map((s) => (s.id === editing.id ? editing : s)) : [...d.services, editing] }));
+    const isExisting = db.services.some((s) => s.id === editing.id);
+    let savedService = { ...editing };
+
+    try {
+      const validCategory = db.categories.find((c) => c.id === editing.categoryId) ?? db.categories[0];
+      const catId = validCategory?.id;
+
+      if (isExisting && editing.id.includes("-")) {
+        const res = await fetch(`/api/proxy/api/v1/catalog/services/${editing.id}/`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            name: editing.name,
+            category_id: catId,
+            price: editing.price,
+            time_minutes: editing.duration,
+            is_active: editing.active,
+          }),
+        });
+        if (res.ok) {
+          const data = await res.json().catch(() => null);
+          if (data?.id) {
+            savedService = {
+              ...savedService,
+              name: data.name ?? savedService.name,
+              price: Number(data.price) || savedService.price,
+              duration: data.time_minutes ?? savedService.duration,
+            };
+          }
+        }
+      } else if (catId) {
+        const res = await fetch("/api/proxy/api/v1/catalog/services/", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            category_id: catId,
+            name: editing.name,
+            price: editing.price,
+            time_minutes: editing.duration,
+            is_active: editing.active,
+          }),
+        });
+        if (res.ok) {
+          const data = await res.json().catch(() => null);
+          if (data?.id) {
+            savedService = {
+              ...savedService,
+              id: data.id,
+              name: data.name ?? savedService.name,
+              price: Number(data.price) || savedService.price,
+              duration: data.time_minutes ?? savedService.duration,
+            };
+          }
+        }
+      }
+    } catch (e) {
+      console.warn("Backend catalog save notice:", e);
+    }
+
+    update((d) => ({
+      ...d,
+      services: d.services.some((s) => s.id === savedService.id)
+        ? d.services.map((s) => (s.id === savedService.id ? savedService : s))
+        : [...d.services, savedService],
+    }));
     setEditing(null);
   }
   const num = (v: string) => Math.max(0, Number(v) || 0);

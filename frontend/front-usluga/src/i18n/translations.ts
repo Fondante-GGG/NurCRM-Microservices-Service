@@ -25,12 +25,14 @@ export const ru = {
     sklad: "Склад",
     market: "Маркет",
     proizvodstvo: "Производство",
+    support: "Техподдержка",
   },
   sectionHints: {
     usluga: "Записи, мастера, клиенты",
     sklad: "Остатки, приёмка, ревизия",
     market: "Товары, продажи, витрина",
     proizvodstvo: "Заказы, сырьё, выпуск",
+    support: "Панель управления поддержкой",
   },
   shell: {
     logout: "Выйти",
@@ -95,12 +97,14 @@ export const ky: typeof ru = {
     sklad: "Кампа",
     market: "Маркет",
     proizvodstvo: "Өндүрүш",
+    support: "Техникалык колдоо",
   },
   sectionHints: {
     usluga: "Жазылуулар, усталар, кардарлар",
     sklad: "Калдыктар, кабыл алуу, ревизия",
     market: "Товарлар, сатуулар, витрина",
     proizvodstvo: "Заказдар, чийки зат, чыгаруу",
+    support: "Колдоо кызматынын панели",
   },
   shell: {
     logout: "Чыгуу",

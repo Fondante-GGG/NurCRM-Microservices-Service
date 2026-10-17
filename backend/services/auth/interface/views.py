@@ -43,6 +43,7 @@ class LoginView(APIView):
             uow = DjangoAuthUnitOfWork()
             result = LoginUseCase(uow).execute(dto)
 
+            section = "support" if result.role == "support" else "usluga"
             return Response({
                 "access": result.access_token,
                 "refresh": result.refresh_token,
@@ -50,6 +51,8 @@ class LoginView(APIView):
                 "refresh_token": result.refresh_token,
                 "company_id": result.company_id,
                 "user_id": result.user_id,
+                "section": section,
+                "sector": section,
                 "user": {
                     "id": result.user_id,
                     "company_id": result.company_id,
@@ -59,6 +62,7 @@ class LoginView(APIView):
                     "role": result.role,
                     "permissions": result.permissions,
                     "company_slug": result.company_slug,
+                    "section": section,
                 }
             })
         except CRMException as e:

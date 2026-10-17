@@ -80,12 +80,52 @@ export function BookingWidget() {
     const i = seq.indexOf(step);
     go(i <= 0 ? "start" : (seq[i - 1] as Step));
   }
-  function submit() {
+  async function submit() {
     if (!branch || !name.trim() || !phone.trim() || !time) return;
     const chosenMaster = master ?? slotMasters.find((m) => slotsFor(m, date).includes(time)) ?? null;
+    let requestId = newId("rq");
+
+    try {
+      const timeStart = time.length === 5 ? `${time}:00` : time;
+      const res = await fetch("/api/proxy/api/v1/bookings/", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          client_name: name.trim(),
+          client_phone: phone.trim(),
+          services: chosen.map((s) => ({ id: s.id, price: String(priceFor(s, chosenMaster)) })),
+          date,
+          time_start: timeStart,
+          total_price: String(total),
+          total_duration_min: duration,
+          master_id: chosenMaster?.id && chosenMaster.id.includes("-") ? chosenMaster.id : undefined,
+          client_comment: comment.trim(),
+        }),
+      });
+      if (res.ok) {
+        const data = await res.json().catch(() => null);
+        if (data?.id) requestId = data.id;
+      }
+    } catch (e) {
+      console.warn("Backend booking submit notice:", e);
+    }
+
     update((d) => ({
       ...d,
-      requests: [{ id: newId("rq"), branchId: branch.id, clientName: name.trim(), phone: phone.trim(), serviceId: serviceIds[0] ?? null, serviceIds, comment: comment.trim(), staffId: chosenMaster?.id ?? null, wishedAt: `${date}T${time}`, source: "online" as const, status: "new" as const, createdAt: toIsoLocal(new Date()) }, ...d.requests],
+      requests: [{
+        id: requestId,
+        branchId: branch.id,
+        clientName: name.trim(),
+        phone: phone.trim(),
+        serviceId: serviceIds[0] ?? null,
+        serviceIds,
+        comment: comment.trim(),
+        staffId: chosenMaster?.id ?? null,
+        wishedAt: `${date}T${time}`,
+        source: "online" as const,
+        status: "new" as const,
+        createdAt: toIsoLocal(new Date()),
+      }, ...d.requests],
     }));
     go("done");
   }

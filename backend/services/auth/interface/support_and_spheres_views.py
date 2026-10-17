@@ -204,11 +204,28 @@ class MainCompanyTempAccessView(APIView):
 
 
 class MainBranchesView(APIView):
+    def get(self, request):
+        user = get_authenticated_user(request)
+        branches = BranchModel.objects.filter(company_id=user.company_id, is_active=True).order_by("created_at")
+        return Response([
+            {
+                "id": str(b.id),
+                "name": b.name,
+                "address": b.address,
+                "phone": "",
+                "hours": "",
+                "active": b.is_active,
+                "showcaseOnly": False,
+            }
+            for b in branches
+        ])
+
     def post(self, request):
         return Response(
             {"code": "forbidden", "message": "Владелец филиалы создавать не может. Для подключения филиала обратитесь в техподдержку."},
             status=status.HTTP_403_FORBIDDEN,
         )
+
 
 
 class MeView(APIView):

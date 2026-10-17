@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Badge, Card, Cell, PageHeader, Row, Segmented, Stat, Table } from "@/components/ui";
 import { useStore } from "@/data/store";
 import { useI18n } from "@/i18n/provider";
@@ -16,10 +16,27 @@ export function AnalyticsScreen() {
   const { t, lang } = useI18n();
   const a = t.u.analytics;
   const [range, setRange] = useState<"today" | "week" | "month">("month");
+  const [serverDashboard, setServerDashboard] = useState<any>(null);
   const today = todayKey();
   const period = periodOf(today);
   const from = range === "today" ? today : range === "week" ? startOfWeek(today) : `${period}-01`;
   const inBranch = <T extends { branchId: string }>(x: T) => branchId === "all" || x.branchId === branchId;
+
+  useEffect(() => {
+    let active = true;
+    const p = range === "today" ? "day" : "month";
+    fetch(`/api/proxy/api/v1/analytics/dashboard/?period=${p}`)
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (active && data?.financial) {
+          setServerDashboard(data);
+        }
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, [range]);
 
   const visits = db.visits.filter((v) => inBranch(v) && v.closedAt.slice(0, 10) >= from && v.closedAt.slice(0, 10) <= today);
   const revenue = visits.reduce((s, v) => s + v.total - v.refundAmount, 0);

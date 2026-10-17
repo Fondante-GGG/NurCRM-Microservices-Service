@@ -44,9 +44,76 @@ export function ClientsScreen() {
   const catTone = (c: ClientCategory) => (c === "vip" ? "good" : c === "blacklist" ? "bad" : c === "new" ? "info" : "neutral");
   const dup = editing && editing.phone.trim() && db.clients.some((c) => c.id !== editing.id && c.phone.replace(/\D/g, "") === editing.phone.replace(/\D/g, ""));
 
-  function save() {
+  async function save() {
     if (!editing || !editing.name.trim()) return;
-    update((d) => ({ ...d, clients: d.clients.some((c) => c.id === editing.id) ? d.clients.map((c) => (c.id === editing.id ? editing : c)) : [...d.clients, editing] }));
+    const isExisting = db.clients.some((c) => c.id === editing.id);
+    let savedClient = { ...editing };
+
+    try {
+      const statusMap: Record<string, string> = {
+        vip: "active",
+        blacklist: "blacklist",
+        new: "active",
+        regular: "active",
+      };
+      const backendStatus = statusMap[editing.category] || "active";
+
+      if (isExisting && editing.id.includes("-")) {
+        const res = await fetch(`/api/proxy/api/v1/clients/${editing.id}/`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            full_name: editing.name,
+            phone: editing.phone,
+            birth_date: editing.birthday || null,
+            status: backendStatus,
+            notes: editing.notes,
+          }),
+        });
+        if (res.ok) {
+          const data = await res.json().catch(() => null);
+          if (data?.id) {
+            savedClient = {
+              ...savedClient,
+              name: data.full_name ?? savedClient.name,
+              phone: data.phone ?? savedClient.phone,
+            };
+          }
+        }
+      } else {
+        const res = await fetch("/api/proxy/api/v1/clients/", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            full_name: editing.name,
+            phone: editing.phone,
+            birth_date: editing.birthday || null,
+            status: backendStatus,
+            notes: editing.notes,
+          }),
+        });
+        if (res.ok) {
+          const data = await res.json().catch(() => null);
+          if (data?.id) {
+            savedClient = {
+              ...savedClient,
+              id: data.id,
+              name: data.full_name ?? savedClient.name,
+              phone: data.phone ?? savedClient.phone,
+            };
+          }
+        }
+      }
+    } catch (e) {
+      console.warn("Backend client save notice:", e);
+    }
+
+    update((d) => ({
+      ...d,
+      clients: d.clients.some((c) => c.id === savedClient.id)
+        ? d.clients.map((c) => (c.id === savedClient.id ? savedClient : c))
+        : [...d.clients, savedClient],
+    }));
     setEditing(null);
   }
 

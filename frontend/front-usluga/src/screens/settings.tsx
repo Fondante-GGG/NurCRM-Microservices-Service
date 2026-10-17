@@ -51,7 +51,24 @@ export function SettingsScreen() {
     return () => window.removeEventListener("beforeunload", onLeave);
   }, [dirty]);
 
-  function save() {
+  async function save() {
+    try {
+      await fetch("/api/proxy/api/main/company/", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: form.company.name,
+          legal_name: form.company.legalName,
+          inn: form.company.inn,
+          okpo: form.company.okpo,
+          account: form.company.account,
+          bik: form.company.bik,
+          address: form.company.address,
+          phones: form.company.phones ? form.company.phones.split(",").map((p) => p.trim()).filter(Boolean) : [],
+          intake,
+        }),
+      });
+    } catch {}
     update((d) => ({ ...d, settings: form, intake, roles: roles.map((r) => (r.builtin ? d.roles.find((x) => x.id === r.id) ?? r : r)) }));
     setSaved(true);
     window.setTimeout(() => setSaved(false), 2000);
@@ -61,8 +78,20 @@ export function SettingsScreen() {
     setRoles(db.roles);
     setIntake(db.intake);
   }
-  function sendTicket() {
+  async function sendTicket() {
     if (!ticket.message.trim() || !ticket.contact.trim()) return;
+    try {
+      await fetch("/api/proxy/api/main/support/tickets/", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          topic: ticket.topic,
+          message: ticket.message.trim(),
+          contact: ticket.contact.trim(),
+          share_access: ticket.shareAccess,
+        }),
+      });
+    } catch {}
     update((d) => ({ ...d, tempAccessUntil: ticket.shareAccess ? `${addDays(todayKey(), 3)}T${toIsoLocal(new Date()).slice(11)}` : d.tempAccessUntil, support: [{ id: newId("tk"), createdAt: toIsoLocal(new Date()), topic: ticket.topic, message: ticket.message.trim(), contact: ticket.contact.trim(), shareAccess: ticket.shareAccess, status: "new" }, ...d.support] }));
     setTicket({ topic: "setup", message: "", contact: "", shareAccess: false, login: "", password: "" });
     setTicketSent(true);

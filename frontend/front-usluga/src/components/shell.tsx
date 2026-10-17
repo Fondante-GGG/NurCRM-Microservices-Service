@@ -31,10 +31,27 @@ export function Shell({ section, name, canLogout, children }: { section: Section
 
   if (ready && section === "usluga" && !db.industry) return <SetupWizard />;
 
-  const exitSupport = () => {
-    update((d) => ({ ...d, supportLog: [{ id: `sl${Date.now()}`, at: new Date().toISOString().slice(0, 16), agent: supportAgent ?? "", companyId: "c_self", action: t.u.sp.exit }, ...d.supportLog] }));
-    setSupportAgent(null);
-    window.location.href = "/support";
+  useEffect(() => {
+    fetch("/api/auth/me")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (data?.impersonated_by) {
+          setSupportAgent(data.impersonated_by);
+        }
+      })
+      .catch(() => {});
+  }, [setSupportAgent]);
+
+  const exitSupport = async () => {
+    try {
+      const res = await fetch("/api/auth/impersonate-exit", { method: "POST" });
+      const data = await res.json().catch(() => ({}));
+      setSupportAgent(null);
+      window.location.href = data.next || "/support";
+    } catch {
+      setSupportAgent(null);
+      window.location.href = "/support";
+    }
   };
 
   return (

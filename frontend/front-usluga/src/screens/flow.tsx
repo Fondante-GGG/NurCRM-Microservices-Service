@@ -41,31 +41,61 @@ export function FlowScreen() {
   const svcNames = (ids: string[]) => ids.map((id) => db.services.find((s) => s.id === id)?.name).join(", ");
   const found = q.trim().length >= 2 ? db.clients.filter((c) => (c.name + c.phone).toLowerCase().includes(q.toLowerCase())).slice(0, 5) : [];
 
-  function setBusy(staffId: string, busy: boolean) {
+  async function setBusy(staffId: string, busy: boolean) {
+    try {
+      await fetch(`/api/proxy/api/main/shifts/${staffId}/`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ fact: busy ? "busy" : "worked" }),
+      });
+    } catch {}
     update((d) => {
       const sh = d.shifts.find((s) => s.staffId === staffId && s.date === today);
       const shifts = sh ? d.shifts.map((s) => (s.id === sh.id ? { ...s, fact: busy ? "missed" as const : "worked" as const } : s)) : [...d.shifts, { id: newId("sh"), staffId, branchId: branch, date: today, from: "09:00", to: "21:00", breakMin: 0, fact: busy ? "missed" as const : "worked" as const }];
       return { ...d, shifts };
     });
   }
-  function take(a: Appointment, staffId?: string) {
+  async function take(a: Appointment, staffId?: string) {
     const sid = staffId ?? a.staffId;
     if (!sid) return;
+    try {
+      await fetch(`/api/proxy/api/main/appointments/${a.id}/`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: "arrived", staff_id: sid }),
+      });
+    } catch {}
     update((d) => ({ ...d, appointments: d.appointments.map((x) => (x.id === a.id ? { ...x, status: "arrived", staffId: sid, start: toIsoLocal(new Date()) } : x)) }));
   }
-  function add() {
+  async function add() {
     if (!draft.serviceIds.length || (!draft.clientId && !draft.name.trim())) return;
-    update((d) => {
-      let clients = d.clients;
-      let clientId = draft.clientId;
-      if (!clientId) {
-        const c: Client = { id: newId("cl"), name: draft.name.trim(), phone: draft.phone.trim(), birthday: null, category: "new", notes: "", consent: true, createdAt: today };
-        clients = [...clients, c];
-        clientId = c.id;
-      }
-      const duration = draft.serviceIds.reduce((s, id) => s + (d.services.find((x) => x.id === id)?.duration ?? 0), 0);
-      return { ...d, clients, appointments: [...d.appointments, { id: newId("ap"), branchId: branch, staffId: draft.staffId, clientId, start: toIsoLocal(new Date()), duration, serviceIds: draft.serviceIds, status: "pending", source: "admin", createdById: userId, note: "", visitId: null }] };
-    });
+    const duration = draft.serviceIds.reduce((s, id) => s + (db.services.find((x) => x.id === id)?.duration ?? 0), 0);
+    const nowIso = toIsoLocal(new Date());
+    let clientId = draft.clientId;
+    if (!clientId) {
+      const c: Client = { id: newId("cl"), name: draft.name.trim(), phone: draft.phone.trim(), birthday: null, category: "new", notes: "", consent: true, createdAt: today };
+      clientId = c.id;
+      update((d) => ({ ...d, clients: [...d.clients, c] }));
+    }
+    try {
+      await fetch("/api/proxy/api/main/appointments/", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          client_id: clientId,
+          branch_id: branch,
+          staff_id: draft.staffId || undefined,
+          service_ids: draft.serviceIds,
+          start: nowIso,
+          duration,
+          status: "pending",
+        }),
+      });
+    } catch {}
+    update((d) => ({
+      ...d,
+      appointments: [...d.appointments, { id: newId("ap"), branchId: branch, staffId: draft.staffId, clientId, start: nowIso, duration, serviceIds: draft.serviceIds, status: "pending", source: "admin", createdById: userId, note: "", visitId: null }]
+    }));
     setAdding(false);
     setDraft({ clientId: "", name: "", phone: "", serviceIds: [], staffId: "" });
     setQ("");

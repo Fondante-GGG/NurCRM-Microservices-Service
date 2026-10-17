@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Badge, Button, Card, Cell, ConfirmButton, Drawer, Field, Input, PageHeader, Row, Segmented, Select, Table } from "@/components/ui";
 import { newId, useStore } from "@/data/store";
@@ -27,7 +27,89 @@ export function SupportPanel() {
   const [replyText, setReplyText] = useState("");
   const [newBranch, setNewBranch] = useState<{ name: string; address: string } | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [serverCompanies, setServerCompanies] = useState<CompanyCard[]>([]);
+  const [serverTickets, setServerTickets] = useState<SupportTicket[]>([]);
+  const [serverLog, setServerLog] = useState<any[]>([]);
+  const [companyBranches, setCompanyBranches] = useState<{ id: string; name: string; address: string }[]>([]);
   const today = todayKey();
+
+  const reloadBackend = async () => {
+    try {
+      const [compRes, tickRes, logRes, meRes] = await Promise.all([
+        fetch("/api/proxy/api/support/companies/"),
+        fetch("/api/proxy/api/support/tickets/"),
+        fetch("/api/proxy/api/support/log/"),
+        fetch("/api/auth/me"),
+      ]);
+      if (meRes.ok) {
+        const me = await meRes.json();
+        if (me.first_name) setAgent(me.first_name);
+      }
+      if (compRes.ok) {
+        const comps = await compRes.json();
+        if (Array.isArray(comps)) {
+          setServerCompanies(comps.map((c: any) => ({
+            id: c.id,
+            name: c.name || "Без названия",
+            phone: c.phone || "",
+            inn: c.inn || "",
+            industry: c.industry || "barber",
+            intake: c.intake || "schedule",
+            branches: c.branches_count ?? (Array.isArray(c.branches) ? c.branches.length : 1),
+            staff: c.staff_count ?? 1,
+            plan: c.plan || "trial",
+            lastLogin: c.last_login ? c.last_login.slice(0, 16) : `${today}T12:00`,
+            blocked: c.blocked ?? false,
+            tempAccessUntil: c.temp_access_until ?? null,
+          })));
+        }
+      }
+      if (tickRes.ok) {
+        const ticks = await tickRes.json();
+        if (Array.isArray(ticks)) {
+          setServerTickets(ticks.map((t: any) => ({
+            id: t.id,
+            companyId: t.company_id,
+            createdAt: t.created_at,
+            topic: t.topic,
+            message: t.message,
+            contact: t.contact,
+            shareAccess: t.share_access,
+            status: t.status,
+            assignee: t.assignee,
+            reply: t.reply,
+          })));
+        }
+      }
+      if (logRes.ok) {
+        const logs = await logRes.json();
+        if (Array.isArray(logs)) {
+          setServerLog(logs);
+        }
+      }
+    } catch (e) {
+      console.warn("Support panel backend sync error:", e);
+    }
+  };
+
+  useEffect(() => {
+    reloadBackend();
+  }, []);
+
+  useEffect(() => {
+    if (!openId) {
+      setCompanyBranches([]);
+      return;
+    }
+    fetch(`/api/proxy/api/support/companies/${openId}/`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (data?.branches && Array.isArray(data.branches)) {
+          setCompanyBranches(data.branches);
+        }
+      })
+      .catch(() => {});
+  }, [openId]);
 
   // Текущая компания (та, что в кабинете) + примерные остальные.
   const self: CompanyCard = useMemo(() => ({
@@ -35,7 +117,7 @@ export function SupportPanel() {
     industry: db.industry ?? "barber", intake: db.intake, branches: db.branches.length, staff: db.staff.filter((s) => s.active && s.role !== "owner").length,
     plan: "trial", lastLogin: `${today}T${new Date().toTimeString().slice(0, 5)}`, blocked: false, tempAccessUntil: db.tempAccessUntil,
   }), [db, today]);
-  const companies = useMemo(() => [self, ...db.companies], [self, db.companies]);
+  const companies = serverCompanies.length > 0 ? serverCompanies : [self, ...db.companies];
   const shown = companies.filter((c) => !q || (c.name + c.phone + c.inn).toLowerCase().includes(q.toLowerCase()));
   const current = openId ? companies.find((c) => c.id === openId) ?? null : null;
   const isSelf = current?.id === CURRENT_COMPANY_ID;
@@ -48,47 +130,126 @@ export function SupportPanel() {
   }
   function flash(msg: string) { setNotice(msg); window.setTimeout(() => setNotice(null), 3000); }
 
-  function setIndustry(c: CompanyCard, i: Industry) {
-    if (c.id === CURRENT_COMPANY_ID) chooseIndustry(i);
-    else patchCompany(c.id, { industry: i, intake: PROFILES[i].defaultIntake });
-    log(c.id, `${sp.changeIndustry}: ${t.u.industry.names[i]}`);
+  async function setIndustry(c: CompanyCard, i: Industry) {
+    try {
+      await fetch(`/api/proxy/api/support/companies/${c.id}/`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ industry: i, intake: PROFILES[i].defaultIntake }),
+      });
+      flash(`${sp.changeIndustry}: ${t.u.industry.names[i]}`);
+      reloadBackend();
+    } catch {
+      if (c.id === CURRENT_COMPANY_ID) chooseIndustry(i);
+      else patchCompany(c.id, { industry: i, intake: PROFILES[i].defaultIntake });
+      log(c.id, `${sp.changeIndustry}: ${t.u.industry.names[i]}`);
+    }
   }
-  function setIntake(c: CompanyCard, m: IntakeMode) {
-    if (c.id === CURRENT_COMPANY_ID) update((d) => ({ ...d, intake: m }));
-    else patchCompany(c.id, { intake: m });
-    log(c.id, `${sp.intakeMode}: ${t.u.industry.intakeModes[m]}`);
+
+  async function setIntake(c: CompanyCard, m: IntakeMode) {
+    try {
+      await fetch(`/api/proxy/api/support/companies/${c.id}/`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ intake: m }),
+      });
+      flash(`${sp.intakeMode}: ${t.u.industry.intakeModes[m]}`);
+      reloadBackend();
+    } catch {
+      if (c.id === CURRENT_COMPANY_ID) update((d) => ({ ...d, intake: m }));
+      else patchCompany(c.id, { intake: m });
+      log(c.id, `${sp.intakeMode}: ${t.u.industry.intakeModes[m]}`);
+    }
   }
-  function grant(c: CompanyCard, on: boolean) {
-    const until = on ? `${addDays(today, 3)}T${new Date().toTimeString().slice(0, 5)}` : null;
-    if (c.id === CURRENT_COMPANY_ID) update((d) => ({ ...d, tempAccessUntil: until }));
-    else patchCompany(c.id, { tempAccessUntil: until });
-    log(c.id, on ? sp.grantAccess : sp.revokeAccess);
+
+  async function grant(c: CompanyCard, on: boolean) {
+    try {
+      await fetch(`/api/proxy/api/support/companies/${c.id}/temp-access/`, {
+        method: on ? "POST" : "DELETE",
+      });
+      flash(on ? sp.grantAccess : sp.revokeAccess);
+      reloadBackend();
+    } catch {
+      const until = on ? `${addDays(today, 3)}T${new Date().toTimeString().slice(0, 5)}` : null;
+      if (c.id === CURRENT_COMPANY_ID) update((d) => ({ ...d, tempAccessUntil: until }));
+      else patchCompany(c.id, { tempAccessUntil: until });
+      log(c.id, on ? sp.grantAccess : sp.revokeAccess);
+    }
   }
-  function addBranch(c: CompanyCard) {
+
+  async function addBranch(c: CompanyCard) {
     if (!newBranch || !newBranch.name.trim()) return;
-    if (c.id === CURRENT_COMPANY_ID) update((d) => ({ ...d, branches: [...d.branches, { id: newId("b"), name: newBranch.name.trim(), address: newBranch.address.trim(), phone: "", hours: "", active: true, showcaseOnly: false }] }));
-    else patchCompany(c.id, { branches: c.branches + 1 });
-    log(c.id, `${sp.addBranch}: «${newBranch.name.trim()}»`);
-    setNewBranch(null);
+    try {
+      await fetch(`/api/proxy/api/support/companies/${c.id}/branches/`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: newBranch.name.trim(), address: newBranch.address.trim() }),
+      });
+      flash(`${sp.addBranch}: «${newBranch.name.trim()}»`);
+      setNewBranch(null);
+      reloadBackend();
+      if (openId) {
+        fetch(`/api/proxy/api/support/companies/${openId}/`)
+          .then((r) => r.json())
+          .then((data) => setCompanyBranches(data.branches || []));
+      }
+    } catch {
+      if (c.id === CURRENT_COMPANY_ID) update((d) => ({ ...d, branches: [...d.branches, { id: newId("b"), name: newBranch.name.trim(), address: newBranch.address.trim(), phone: "", hours: "", active: true, showcaseOnly: false }] }));
+      else patchCompany(c.id, { branches: c.branches + 1 });
+      log(c.id, `${sp.addBranch}: «${newBranch.name.trim()}»`);
+      setNewBranch(null);
+    }
   }
-  function removeBranch(bid: string, name: string) {
-    update((d) => ({ ...d, branches: d.branches.filter((b) => b.id !== bid) }));
-    log(CURRENT_COMPANY_ID, `${sp.removeBranch}: «${name}»`);
+
+  async function removeBranch(bid: string, name: string) {
+    if (!current) return;
+    try {
+      await fetch(`/api/proxy/api/support/companies/${current.id}/branches/${bid}/`, {
+        method: "DELETE",
+      });
+      flash(`${sp.removeBranch}: «${name}»`);
+      reloadBackend();
+      setCompanyBranches((cur) => cur.filter((b) => b.id !== bid));
+    } catch {
+      update((d) => ({ ...d, branches: d.branches.filter((b) => b.id !== bid) }));
+      log(CURRENT_COMPANY_ID, `${sp.removeBranch}: «${name}»`);
+    }
   }
-  function loginAs(c: CompanyCard) {
-    if (c.id !== CURRENT_COMPANY_ID) { flash(sp.onlyDemo); return; }
-    log(c.id, sp.loginAs);
-    setSupportAgent(agent);
-    setUserId(db.staff.find((s) => s.roleId === "r_owner")?.id ?? "u_owner");
-    router.push("/usluga/analitika");
+
+  async function loginAs(c: CompanyCard) {
+    try {
+      const res = await fetch("/api/auth/impersonate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ company_id: c.id, agent_name: agent }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data.next) {
+        setSupportAgent(agent);
+        window.location.href = data.next;
+      } else {
+        flash(data.error || sp.noAccessToLogin);
+      }
+    } catch {
+      flash(sp.noAccessToLogin);
+    }
   }
 
   // Обращения: текущей компании (без companyId) + возможные чужие.
-  const tickets = db.support.map((x) => ({ ...x, companyId: x.companyId ?? CURRENT_COMPANY_ID }));
+  const tickets = serverTickets.length > 0 ? serverTickets : db.support.map((x) => ({ ...x, companyId: x.companyId ?? CURRENT_COMPANY_ID }));
   const openTicket = ticketId ? tickets.find((x) => x.id === ticketId) ?? null : null;
   const companyName = (id: string) => companies.find((c) => c.id === id)?.name ?? id;
-  function updateTicket(id: string, patch: Partial<SupportTicket>) {
-    update((d) => ({ ...d, support: d.support.map((x) => (x.id === id ? { ...x, ...patch } : x)) }));
+  async function updateTicket(id: string, patch: Partial<SupportTicket>) {
+    try {
+      await fetch(`/api/proxy/api/support/tickets/${id}/`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(patch),
+      });
+      reloadBackend();
+    } catch {
+      update((d) => ({ ...d, support: d.support.map((x) => (x.id === id ? { ...x, ...patch } : x)) }));
+    }
   }
   const tone = (s: SupportTicket["status"]) => (s === "done" ? "good" : s === "in_progress" ? "info" : "warn");
 
@@ -149,11 +310,11 @@ export function SupportPanel() {
 
         {tab === "log" && (
           <Table head={[t.u.common.date, sp.who, sp.company, sp.what]} empty={sp.noLog}>
-            {db.supportLog.map((e) => (
+            {(serverLog.length > 0 ? serverLog : db.supportLog).map((e) => (
               <Row key={e.id}>
-                <Cell className="whitespace-nowrap text-ink-soft">{fmtDate(e.at.slice(0, 10), lang, { day: "numeric", month: "short" })} {e.at.slice(11)}</Cell>
+                <Cell className="whitespace-nowrap text-ink-soft">{fmtDate(e.at.slice(0, 10), lang, { day: "numeric", month: "short" })} {e.at.slice(11, 16)}</Cell>
                 <Cell className="font-bold">{e.agent}</Cell>
-                <Cell>{companyName(e.companyId)}</Cell>
+                <Cell>{companyName(e.company_id || e.companyId)}</Cell>
                 <Cell>{e.action}</Cell>
               </Row>
             ))}
@@ -178,7 +339,7 @@ export function SupportPanel() {
 
             <Card className="p-4">
               <div className="font-bold">{sp.tempAccess}</div>
-              <p className="mt-1 text-xs text-ink-soft">{current.tempAccessUntil ? `${sp.tempAccessUntil} ${fmtDate(current.tempAccessUntil.slice(0, 10), lang, { day: "numeric", month: "long" })} ${current.tempAccessUntil.slice(11)}` : sp.noAccessToLogin}</p>
+              <p className="mt-1 text-xs text-ink-soft">{current.tempAccessUntil ? `${sp.tempAccessUntil} ${fmtDate(current.tempAccessUntil.slice(0, 10), lang, { day: "numeric", month: "long" })} ${current.tempAccessUntil.slice(11, 16)}` : sp.noAccessToLogin}</p>
               <p className="mt-1 text-xs text-ink-soft">{sp.loginAsHint}</p>
               <div className="mt-3">{current.tempAccessUntil ? <Button size="sm" onClick={() => grant(current, false)}>{sp.revokeAccess}</Button> : <Button size="sm" variant="primary" onClick={() => grant(current, true)}>{sp.grantAccess}</Button>}</div>
             </Card>
@@ -197,12 +358,16 @@ export function SupportPanel() {
             </div>
 
             <Card className="p-4">
-              <div className="flex items-center justify-between"><div className="font-bold">{t.u.branches.title} · {current.branches}</div>{!newBranch && <Button size="sm" variant="primary" onClick={() => setNewBranch({ name: "", address: "" })}>{sp.addBranch}</Button>}</div>
-              {isSelf && (
+              <div className="flex items-center justify-between"><div className="font-bold">{t.u.branches.title} · {companyBranches.length || current.branches}</div>{!newBranch && <Button size="sm" variant="primary" onClick={() => setNewBranch({ name: "", address: "" })}>{sp.addBranch}</Button>}</div>
+              {companyBranches.length > 0 ? (
+                <ul className="mt-2 divide-y divide-line-soft text-sm">
+                  {companyBranches.map((b) => <li key={b.id} className="flex items-center justify-between gap-2 py-2"><span><span className="font-semibold">{b.name}</span><span className="block text-xs text-ink-soft">{b.address}</span></span>{companyBranches.length > 1 && <ConfirmButton onConfirm={() => removeBranch(b.id, b.name)}>{sp.removeBranch}</ConfirmButton>}</li>)}
+                </ul>
+              ) : isSelf ? (
                 <ul className="mt-2 divide-y divide-line-soft text-sm">
                   {db.branches.map((b) => <li key={b.id} className="flex items-center justify-between gap-2 py-2"><span><span className="font-semibold">{b.name}</span><span className="block text-xs text-ink-soft">{b.address}</span></span>{db.branches.length > 1 && <ConfirmButton onConfirm={() => removeBranch(b.id, b.name)}>{sp.removeBranch}</ConfirmButton>}</li>)}
                 </ul>
-              )}
+              ) : null}
               {newBranch && (
                 <div className="mt-3 grid gap-3 sm:grid-cols-[1fr_1fr_auto]">
                   <Field label={sp.branchName}><Input value={newBranch.name} onChange={(e) => setNewBranch({ ...newBranch, name: e.target.value })} /></Field>
