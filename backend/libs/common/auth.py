@@ -137,8 +137,13 @@ def create_access_token(
     sid: Optional[str] = None,
     email: Optional[str] = None,
     impersonated_by: Optional[str] = None,
-    expires_in_minutes: int = 15,
+    expires_in_minutes: Optional[int] = None,
 ) -> str:
+    if expires_in_minutes is None:
+        try:
+            expires_in_minutes = int(os.getenv("JWT_ACCESS_EXPIRES_MINUTES", "1440"))
+        except ValueError:
+            expires_in_minutes = 1440
     now = int(time.time())
     payload = {
         "iss": "nurcrm-auth",

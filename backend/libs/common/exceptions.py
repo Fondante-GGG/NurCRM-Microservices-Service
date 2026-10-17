@@ -76,3 +76,21 @@ class ClientExistsError(ConflictError):
 class RateLimitExceededError(CRMException):
     status_code = 429
     code = "rate_limit_exceeded"
+
+
+def crm_exception_handler(exc, context):
+    try:
+        from rest_framework.views import exception_handler
+        from rest_framework.response import Response
+        response = exception_handler(exc, context)
+    except ImportError:
+        response = None
+
+    if isinstance(exc, CRMException):
+        from libs.common.response import error_response
+        from rest_framework.response import Response
+        return Response(
+            error_response(code=exc.code, message=exc.message, details=exc.details),
+            status=exc.status_code,
+        )
+    return response

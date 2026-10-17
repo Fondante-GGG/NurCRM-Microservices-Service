@@ -5,6 +5,21 @@ import { isSection } from "@/lib/sections";
 const TOKEN_COOKIE = "nurcrm_token";
 const SECTION_COOKIE = "nurcrm_section";
 
+function isTokenExpired(token: string): boolean {
+  try {
+    const parts = token.split(".");
+    if (parts.length !== 3) return false;
+    const jsonStr = atob(parts[1].replace(/-/g, "+").replace(/_/g, "/"));
+    const payload = JSON.parse(jsonStr);
+    if (payload.exp && typeof payload.exp === "number") {
+      return Date.now() >= payload.exp * 1000;
+    }
+    return false;
+  } catch {
+    return false;
+  }
+}
+
 // Без входа — только /login. После входа /login и / ведут в свой раздел.
 // Пока вход спрятан, всё ведёт в программу по умолчанию.
 export function proxy(request: NextRequest) {
@@ -21,9 +36,12 @@ export function proxy(request: NextRequest) {
   const section = request.cookies.get(SECTION_COOKIE)?.value;
   const home = isSection(section) ? `/${section}` : "/razdel";
 
-  if (!token) {
+  if (!token || isTokenExpired(token)) {
     if (pathname === "/login" || pathname === "/") return NextResponse.next();
-    return NextResponse.redirect(new URL("/login", request.url));
+    const res = NextResponse.redirect(new URL("/login", request.url));
+    res.cookies.delete(TOKEN_COOKIE);
+    res.cookies.delete(SECTION_COOKIE);
+    return res;
   }
 
   if (pathname === "/login" || pathname === "/") {

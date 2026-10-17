@@ -21,6 +21,9 @@ export async function GET() {
     });
 
     if (!res.ok) {
+      if (res.status === 401) {
+        jar.delete(TOKEN_COOKIE);
+      }
       return NextResponse.json({ error: "error_from_backend", status: res.status }, { status: res.status });
     }
 
