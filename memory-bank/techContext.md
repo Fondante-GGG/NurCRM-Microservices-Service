@@ -4,6 +4,8 @@
 
 | Компонент | Технология | Обоснование |
 | :--- | :--- | :--- |
+| **Фронтенд** | Next.js 16 (Turbopack), React 19, Tailwind CSS 4 | Высокая скорость рендеринга, SSR, httpOnly куки авторизации |
+| **AI-Ассистент** | Multi-Provider Engine (Gemini 1.5, Claude 3.5, OpenAI GPT-4o-mini) | Каскадная отказоустойчивость, ответы по услугам, автовывод тех. обслуживания |
 | **Бизнес-сервисы** | Python 3.11+, Django 5.x, DRF | Высокая скорость разработки CRUD, развитая валидация, транзакционность |
 | **Аналитика и нотификации** | FastAPI, Pydantic v2, Uvicorn | Высокая скорость сериализации, асинхронный ввод/вывод для фоновых задач |
 | **Высоконагруженные шлюзы** | Go 1.22+ | Минимальное потребление памяти, быстрый параллельный расчет слотов (p95 < 50мс), 1000+ одновременных WebSocket-соединений |
@@ -19,7 +21,8 @@
 
 | Сервис | Контейнер / Порт | Назначение |
 | :--- | :--- | :--- |
-| **gateway** | `:80` | Единый Nginx Reverse Proxy |
+| **gateway** | `:80` | Единый Nginx Reverse Proxy (входная точка для SPA и API) |
+| **front-usluga** | `:3001` | Веб-интерфейс Next.js (Услуги, журнал, аналитика, AI-виджет) |
 | **admin-panel** | `:8000` | Django Admin панель |
 | **auth-service** | `:8001` | Аутентификация, JWT, профили и компании |
 | **catalog-service** | `:8002` | Услуги, категории, ставки |
@@ -38,15 +41,8 @@
 
 ---
 
-## 3. Пользователи и роли СУБД
-
-Все пароли сервисов вынесены в переменные окружения (по умолчанию для локального dev: `svc_<name>_secret`):
-- `svc_auth` $\to$ `search_path = auth, public`
-- `svc_catalog` $\to$ `search_path = catalog, public`
-- `svc_clients` $\to$ `search_path = clients, public`
-- `svc_schedule` $\to$ `search_path = schedule, public`
-- `svc_booking` $\to$ `search_path = booking, public`
-- `svc_finance` $\to$ `search_path = finance, public`
-- `svc_analytics` $\to$ `search_path = analytics, public`
-- `svc_notify` $\to$ `search_path = notify, public`
-- `svc_admin` $\to$ чтение всех схем, запись в `admin`
+## 3. Переменные окружения AI-провайдеров
+- `GEMINI_API_KEY` — ключ Google Generative AI (модель `gemini-1.5-flash`).
+- `ANTHROPIC_API_KEY` (или `CLAUDE_API_KEY`) — ключ Anthropic (модель `claude-3-5-sonnet-20241022`).
+- `OPENAI_API_KEY` (или `CODEX_API_KEY`) — ключ OpenAI (модель `gpt-4o-mini`).
+- Логика каскадного перехода: при сбое первого опрашивается следующий; при отсутствии всех — отдается ответ о техническом обслуживании.

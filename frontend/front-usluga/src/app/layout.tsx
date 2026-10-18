@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Montserrat } from "next/font/google";
 import { I18nProvider } from "@/i18n/provider";
 import { StoreProvider } from "@/data/store";
+import { AiAssistantWidget } from "@/components/ai-assistant";
 import "./globals.css";
 
 const montserrat = Montserrat({
@@ -20,7 +21,10 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
     <html lang="ru" className={`${montserrat.variable} h-full antialiased`}>
       <body className="min-h-full flex flex-col">
         <I18nProvider>
-          <StoreProvider>{children}</StoreProvider>
+          <StoreProvider>
+            {children}
+            <AiAssistantWidget />
+          </StoreProvider>
         </I18nProvider>
       </body>
     </html>
