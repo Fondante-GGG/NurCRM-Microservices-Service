@@ -29,8 +29,6 @@ export function Shell({ section, name, canLogout, children }: { section: Section
   };
   useEffect(() => { setDrawer(false); setDrawerClosing(false); }, [pathname]);
 
-  if (ready && section === "usluga" && !db.industry) return <SetupWizard />;
-
   useEffect(() => {
     fetch("/api/auth/me")
       .then((r) => (r.ok ? r.json() : null))
@@ -41,6 +39,16 @@ export function Shell({ section, name, canLogout, children }: { section: Section
       })
       .catch(() => {});
   }, [setSupportAgent]);
+
+  if (!ready) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-paper">
+        <p className="text-sm text-ink-soft" aria-live="polite">{t.u.common.loading}</p>
+      </div>
+    );
+  }
+
+  if (section === "usluga" && !db.industry) return <SetupWizard />;
 
   const exitSupport = async () => {
     try {

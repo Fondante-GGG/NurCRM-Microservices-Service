@@ -160,8 +160,15 @@ class AnalyticsRepository:
                            s->>'name' as sname,
                            count(*) as cnt,
                            COALESCE(sum((s->>'price')::numeric), 0) as rev
-                    FROM schedule.appointments a,
-                         jsonb_array_elements(a.services_snapshot::jsonb) as s
+                    FROM schedule.appointments a
+                    CROSS JOIN LATERAL jsonb_array_elements(
+                        CASE 
+                            WHEN a.services_snapshot IS NOT NULL 
+                             AND jsonb_typeof(a.services_snapshot::jsonb) = 'array' 
+                            THEN a.services_snapshot::jsonb 
+                            ELSE '[]'::jsonb 
+                        END
+                    ) as s
                     WHERE a.company_id = %s AND a.status IN ('completed', 'paid')
                       AND a.start_at >= %s AND a.start_at <= %s
                     GROUP BY sid, sname
@@ -219,6 +226,7 @@ class AnalyticsRepository:
                         weekday_distribution[day_name] = int(r["cnt"])
 
                 # 7. Daily cashflow
+                flow_by_date = {}
                 cur.execute(
                     """
                     SELECT DATE(opened_at) as dt,
@@ -231,11 +239,28 @@ class AnalyticsRepository:
                     (cid_str,),
                 )
                 for r in cur.fetchall():
-                    daily_cashflow.append({
-                        "date": str(r["dt"]),
-                        "inflow": str(r["inf"]),
-                        "outflow": "0.00",
-                    })
+                    d_str = str(r["dt"])
+                    flow_by_date[d_str] = {"date": d_str, "inflow": str(r["inf"]), "outflow": "0.00"}
+
+                cur.execute(
+                    """
+                    SELECT DATE(created_at) as dt,
+                           COALESCE(sum(amount), 0) as outf
+                    FROM finance.salary_payouts
+                    WHERE company_id = %s AND created_at >= NOW() - INTERVAL '7 days'
+                    GROUP BY dt
+                    ORDER BY dt ASC;
+                    """,
+                    (cid_str,),
+                )
+                for r in cur.fetchall():
+                    d_str = str(r["dt"])
+                    if d_str in flow_by_date:
+                        flow_by_date[d_str]["outflow"] = str(r["outf"])
+                    else:
+                        flow_by_date[d_str] = {"date": d_str, "inflow": "0.00", "outflow": str(r["outf"])}
+
+                daily_cashflow = sorted(flow_by_date.values(), key=lambda x: x["date"])
 
         avg_ticket = (revenue_total / Decimal(completed_count)).quantize(Decimal("0.01")) if completed_count > 0 else Decimal("0.00")
         conversion = round((completed_count / total_appts) * 100, 2) if total_appts > 0 else 0.0

@@ -41,7 +41,7 @@ REST_FRAMEWORK = {
     "DEFAULT_RENDERER_CLASSES": [
         "rest_framework.renderers.JSONRenderer",
     ],
-    "DEFAULT_EXCEPTION_HANDLER": "libs.common.exceptions.crm_exception_handler",
+    "EXCEPTION_HANDLER": "libs.common.exceptions.crm_exception_handler",
     "UNAUTHENTICATED_USER": None,
 }
 

@@ -23,10 +23,18 @@ import { InventoryScreen } from "./inventory";
 import { SettingsScreen } from "./settings";
 
 // Какой экран открывает каждый пункт меню «Услуги».
+function ServicesTab() {
+  return <ServicesScreen addons={false} />;
+}
+
+function DopServicesTab() {
+  return <ServicesScreen addons={true} />;
+}
+
 const SCREENS: Record<string, ComponentType> = {
   sotrudniki: StaffScreen,
-  uslugi: () => <ServicesScreen addons={false} />,
-  "dop-uslugi": () => <ServicesScreen addons />,
+  uslugi: ServicesTab,
+  "dop-uslugi": DopServicesTab,
   filialy: BranchesScreen,
   zapisi: JournalScreen,
   klienty: ClientsScreen,
@@ -59,7 +67,7 @@ export function Screen({ page }: { page: string }) {
   return (
     <>
       {!canManage(page) && <p className="mb-4 rounded-xl bg-warn-soft px-4 py-2 text-sm font-semibold text-warn">{t.u.access.readOnly}</p>}
-      <Cmp />
+      <Cmp key={page} />
       <p className="mt-8 text-xs text-ink-soft">{t.u.common.demoNote}</p>
     </>
   );
