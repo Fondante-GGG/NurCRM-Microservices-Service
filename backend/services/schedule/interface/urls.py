@@ -11,10 +11,11 @@ from backend.services.schedule.interface.views import (
 )
 
 urlpatterns = [
-    # API v1
     path("api/v1/schedule/appointments/", AppointmentListCreateView.as_view(), name="v1-appointments"),
     path("api/v1/schedule/appointments/my/", MyAppointmentsView.as_view(), name="v1-my-appointments"),
     path("api/v1/schedule/appointments/<uuid:appt_id>/", AppointmentDetailView.as_view(), name="v1-appointment-detail"),
+    path("api/v1/schedule/shifts/", ShiftListCreateView.as_view(), name="v1-shifts"),
+    path("api/v1/schedule/shifts/<uuid:shift_id>/", ShiftDetailView.as_view(), name="v1-shift-detail"),
 
     # TZ tz-beka-support-i-sfery.md endpoints (/api/main/...)
     path("api/main/appointments/", AppointmentListCreateView.as_view(), name="main-appointments"),

@@ -50,6 +50,7 @@ services:
       - public-gateway
       - realtime-gateway
       - admin-panel
+      - frontend-service
 
   auth-service:
     build:
@@ -223,6 +224,18 @@ services:
       REDIS_ADDR: redis:6379
     depends_on:
       - redis
+
+  frontend-service:
+    build:
+      context: ../../frontend/front-usluga
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      NURCRM_API_URL: http://gateway
+      NURCRM_LOGIN_PATH: /api/v1/auth/login/
+      NURCRM_DEV_LOGIN: 0
+      PORT: 3001
+      GEMINI_API_KEY: ${GEMINI_API_KEY}
 
 volumes:
   pgdata:

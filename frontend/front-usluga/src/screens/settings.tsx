@@ -285,7 +285,11 @@ export function SettingsScreen() {
                 <h2 className="font-bold">{t.u.security.sessions}</h2>
                 <p className="mt-1 text-sm text-ink-soft">{t.u.security.sessionsHint}</p>
                 {AUTH_ENABLED && (
-                  <form action="/api/auth/logout" method="post" className="mt-3"><Button variant="danger" type="submit">{t.u.security.logout}</Button></form>
+                  <form action="/api/auth/logout" method="post" className="mt-3">
+                    <Button variant="danger" type="submit" onClick={() => { try { localStorage.clear(); } catch {} }}>
+                      {t.u.security.logout}
+                    </Button>
+                  </form>
                 )}
               </Card>
             </>

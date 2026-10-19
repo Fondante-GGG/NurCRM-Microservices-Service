@@ -420,6 +420,8 @@ GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA schedule TO svc_schedule;
 GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA booking TO svc_booking;
 GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA finance TO svc_finance;
 GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA analytics TO svc_analytics;
+GRANT USAGE ON SCHEMA schedule, finance, auth, catalog, clients TO svc_analytics;
+GRANT SELECT ON ALL TABLES IN SCHEMA schedule, finance, auth, catalog, clients TO svc_analytics;
 GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA notify TO svc_notify;
 GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA admin TO svc_admin;
 GRANT SELECT ON ALL TABLES IN SCHEMA auth, catalog, clients, schedule, booking, finance TO svc_admin;

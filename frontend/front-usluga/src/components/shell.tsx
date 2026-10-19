@@ -77,13 +77,13 @@ export function Shell({ section, name, canLogout, children }: { section: Section
         }`}
       >
         <div className={`flex items-center ${collapsed ? "justify-center" : "justify-between px-2"}`}>
-          {!collapsed && (
+          {collapsed ? (
+            /* eslint-disable-next-line @next/next/no-img-element */
+            <img src="/kezek-icon-dark.png" alt="KEZEK" className="size-8 object-contain" />
+          ) : (
             <div className="flex min-w-0 items-center gap-2.5">
-              <span className="flex size-9 shrink-0 items-center justify-center rounded-[10px] bg-gold text-base font-extrabold text-primary">N</span>
-              <div className="min-w-0">
-                <div className="truncate text-[15px] font-bold leading-tight">{t.appName}</div>
-                <div className="truncate text-[11px] text-nav-muted">{t.sections[section]}</div>
-              </div>
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src="/kezek-logo-dark.png" alt="KEZEK by NurCRM" className="h-8 w-auto max-w-[190px] object-contain" />
             </div>
           )}
           <button
@@ -107,11 +107,8 @@ export function Shell({ section, name, canLogout, children }: { section: Section
           <aside className={`absolute inset-y-0 left-0 flex w-72 max-w-[85vw] flex-col bg-nav px-3 py-4 text-white shadow-xl ${drawerClosing ? "anim-slide-out-left" : "anim-slide-in-left"}`}>
             <div className="flex items-center justify-between px-2">
               <div className="flex items-center gap-2.5">
-                <span className="flex size-9 items-center justify-center rounded-[10px] bg-gold text-base font-extrabold text-primary">N</span>
-                <div>
-                  <div className="text-[15px] font-bold leading-tight">{t.appName}</div>
-                  <div className="text-[11px] text-nav-muted">{t.sections[section]}</div>
-                </div>
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src="/kezek-logo-dark.png" alt="KEZEK by NurCRM" className="h-8 w-auto max-w-[190px] object-contain" />
               </div>
               <button type="button" onClick={closeDrawer} aria-label={t.shell.closeMenu} className="press rounded-lg p-1.5 text-nav-text hover:bg-white/10">
                 <Icon name="x" />
@@ -140,7 +137,15 @@ export function Shell({ section, name, canLogout, children }: { section: Section
             <ProfileButton />
             {canLogout && (
               <form action="/api/auth/logout" method="post">
-                <button type="submit" className="rounded-lg border border-line px-3 py-1.5 text-sm font-semibold hover:bg-paper">
+                <button
+                  type="submit"
+                  onClick={() => {
+                    try {
+                      localStorage.clear();
+                    } catch {}
+                  }}
+                  className="rounded-lg border border-line px-3 py-1.5 text-sm font-semibold hover:bg-paper"
+                >
                   {t.shell.logout}
                 </button>
               </form>

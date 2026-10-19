@@ -14,6 +14,7 @@ urlpatterns = [
     path("api/v1/finance/shifts/", ShiftListCreateView.as_view(), name="v1-shifts"),
     path("api/v1/finance/shifts/<uuid:shift_id>/close/", ShiftCloseView.as_view(), name="v1-shift-close"),
     path("api/v1/finance/salary/accruals/", SalaryAccrualsView.as_view(), name="v1-accruals"),
+    path("api/v1/finance/accruals/", SalaryAccrualsView.as_view(), name="v1-accruals-alias"),
     path("api/v1/finance/salary/payouts/", SalaryPayoutsView.as_view(), name="v1-payouts"),
     path("api/v1/finance/salary/summary/", SalarySummaryView.as_view(), name="v1-salary-summary"),
     path("api/v1/finance/warehouse/materials/", WarehouseMaterialsView.as_view(), name="v1-warehouse-materials"),

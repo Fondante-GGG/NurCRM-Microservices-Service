@@ -25,6 +25,9 @@ class MultiDatabaseRouter:
         return "default"
 
     def allow_relation(self, obj1, obj2, **hints):
+        django_apps = {"auth", "contenttypes", "admin", "sessions"}
+        if obj1._meta.app_label in django_apps and obj2._meta.app_label in django_apps:
+            return True
         # Strict rule: no relations between different service schemas
         if obj1._meta.app_label != obj2._meta.app_label:
             return False

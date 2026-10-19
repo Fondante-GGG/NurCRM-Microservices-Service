@@ -84,10 +84,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           fetch("/api/proxy/api/v1/bookings/").catch(() => null),
         ]);
 
+        let currentUser: any = null;
         if (meRes && meRes.ok) {
-          const me = await meRes.json().catch(() => null);
-          if (me?.impersonated_by) {
-            setSupportAgentState(me.impersonated_by);
+          currentUser = await meRes.json().catch(() => null);
+          if (currentUser?.impersonated_by) {
+            setSupportAgentState(currentUser.impersonated_by);
           }
         }
 
@@ -264,22 +265,60 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           if (serverTickets.length > 0) {
             updated.support = serverTickets;
           }
-          if (serverAppointments.length > 0) {
-            updated.appointments = serverAppointments;
+
+          if (currentUser) {
+            const userName = `${currentUser.first_name || ""} ${currentUser.last_name || ""}`.trim() || currentUser.email;
+            const userStaff = {
+              id: currentUser.id || "u_owner",
+              name: userName,
+              phone: currentUser.phone_number || "",
+              positionId: "p_owner",
+              branchIds: branchesData.length > 0 ? branchesData.map((b: any) => b.id) : ["b1"],
+              role: currentUser.role || "owner",
+              roleId: currentUser.role === "owner" ? "r_owner" : "r_master",
+              pages: null,
+              access: null,
+              employment: "staff" as const,
+              hiredAt: "2026-01-01",
+              active: true,
+              schemeId: null,
+              serviceIds: [],
+              color: "#3b82f6",
+            };
+            updated.staff = [userStaff];
+            setUserIdState(userStaff.id);
+
+            // Sync services, categories, clients, and appointments with real backend
+            if (svcRes && svcRes.ok) {
+              updated.services = serverServices;
+            }
+            if (catRes && catRes.ok) {
+              updated.categories = serverCategories;
+            }
+            if (clRes && clRes.ok) {
+              updated.clients = serverClients;
+            }
+            if (apptRes && apptRes.ok) {
+              updated.appointments = serverAppointments;
+            }
+            if (bkRes && bkRes.ok) {
+              updated.requests = serverBookings;
+            }
+
+            // If clean account has 0 services/clients, ensure visits and shifts are clean too
+            if (serverServices.length === 0 && serverClients.length === 0) {
+              updated.visits = [];
+              updated.shifts = [];
+              updated.cashOps = [];
+            }
+          } else {
+            if (serverAppointments.length > 0) updated.appointments = serverAppointments;
+            if (serverCategories.length > 0) updated.categories = serverCategories;
+            if (serverServices.length > 0) updated.services = serverServices;
+            if (serverClients.length > 0) updated.clients = serverClients;
+            if (serverBookings.length > 0) updated.requests = serverBookings;
           }
-          if (serverCategories.length > 0) {
-            updated.categories = serverCategories;
-          }
-          if (serverServices.length > 0) {
-            // merge or replace
-            updated.services = serverServices;
-          }
-          if (serverClients.length > 0) {
-            updated.clients = serverClients;
-          }
-          if (serverBookings.length > 0) {
-            updated.requests = serverBookings;
-          }
+
           return updated;
         });
       } catch (e) {

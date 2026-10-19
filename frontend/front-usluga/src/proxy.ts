@@ -20,14 +20,21 @@ function isTokenExpired(token: string): boolean {
   }
 }
 
+function getBaseUrl(request: NextRequest): string {
+  const host = request.headers.get("x-forwarded-host") || request.headers.get("host") || "stage.nurcrm.kg";
+  const proto = request.headers.get("x-forwarded-proto") || "https";
+  return `${proto}://${host}`;
+}
+
 // Без входа — только /login. После входа /login и / ведут в свой раздел.
 // Пока вход спрятан, всё ведёт в программу по умолчанию.
 export function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
+  const baseUrl = getBaseUrl(request);
 
   if (!AUTH_ENABLED) {
     if (pathname === "/" || pathname === "/login" || pathname === "/razdel") {
-      return NextResponse.redirect(new URL(`/${DEFAULT_SECTION}`, request.url));
+      return NextResponse.redirect(new URL(`/${DEFAULT_SECTION}`, baseUrl));
     }
     return NextResponse.next();
   }
@@ -38,14 +45,14 @@ export function proxy(request: NextRequest) {
 
   if (!token || isTokenExpired(token)) {
     if (pathname === "/login" || pathname === "/") return NextResponse.next();
-    const res = NextResponse.redirect(new URL("/login", request.url));
+    const res = NextResponse.redirect(new URL("/login", baseUrl));
     res.cookies.delete(TOKEN_COOKIE);
     res.cookies.delete(SECTION_COOKIE);
     return res;
   }
 
   if (pathname === "/login" || pathname === "/") {
-    return NextResponse.redirect(new URL(home, request.url));
+    return NextResponse.redirect(new URL(home, baseUrl));
   }
   return NextResponse.next();
 }
