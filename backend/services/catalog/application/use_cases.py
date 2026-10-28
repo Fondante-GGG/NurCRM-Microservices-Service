@@ -6,8 +6,9 @@ from typing import List, Optional, Protocol
 from libs.common.domain import Money
 from libs.common.events import EventEnvelope, EventTypes
 from libs.common.exceptions import NotFoundError, VersionConflictError, ValidationError
-from backend.services.catalog.domain.models import ServiceCategory, Service, SalaryRate
+from backend.services.catalog.domain.models import ServiceCategory, Service, SalaryRate, Product
 from backend.services.catalog.domain.repositories import ServiceCategoryRepository, ServiceRepository, SalaryRateRepository
+from backend.services.catalog.domain.repositories import ProductRepository
 from backend.services.catalog.application.dto import (
     CreateServiceDTO,
     UpdateServiceDTO,
@@ -201,3 +202,77 @@ class SetSalaryRateUseCase:
                 master_id=str(rate.master_id) if rate.master_id else None,
                 percent=rate.percent,
             )
+
+
+class CreateProductUseCase:
+    def __init__(self, repository: ProductRepository):
+        self.repository = repository
+
+    def execute(
+        self,
+        company_id: uuid.UUID,
+        *,
+        name: str,
+        sku: str = "",
+        category: str = "",
+        price: Decimal = Decimal("0"),
+        cost_price: Decimal = Decimal("0"),
+        wholesale_price: Optional[Decimal] = None,
+        unit_code: str = "pcs",
+        minimum_quantity: Decimal = Decimal("1"),
+        quantity_step: Decimal = Decimal("1"),
+        attributes: Optional[Dict[str, Any]] = None,
+        is_active: bool = True,
+    ) -> Product:
+        product = Product(
+            id=uuid.uuid4(),
+            company_id=company_id,
+            name=name,
+            sku=sku,
+            category=category,
+            price=Money(price),
+            cost_price=Money(cost_price),
+            wholesale_price=Money(wholesale_price) if wholesale_price is not None else None,
+            unit_code=unit_code,
+            minimum_quantity=minimum_quantity,
+            quantity_step=quantity_step,
+            attributes=attributes or {},
+            is_active=is_active,
+        )
+        self.repository.save(product)
+        return product
+
+
+class UpdateProductUseCase:
+    def __init__(self, repository: ProductRepository):
+        self.repository = repository
+
+    def execute(
+        self,
+        company_id: uuid.UUID,
+        product_id: uuid.UUID,
+        *,
+        expected_version: Optional[int] = None,
+        values: Dict[str, Any],
+    ) -> Product:
+        product = self.repository.get_by_id(company_id, product_id)
+        if product is None:
+            raise NotFoundError(f"Product {product_id} not found")
+        if expected_version is not None and expected_version != product.version:
+            raise VersionConflictError(current_version=product.version)
+
+        for field_name in ("name", "sku", "category", "unit_code", "attributes", "is_active"):
+            if field_name in values:
+                setattr(product, field_name, values[field_name])
+        for field_name in ("price", "cost_price", "wholesale_price"):
+            if field_name in values:
+                amount = values[field_name]
+                setattr(product, field_name, Money(amount) if amount is not None else None)
+        for field_name in ("minimum_quantity", "quantity_step"):
+            if field_name in values:
+                setattr(product, field_name, values[field_name])
+
+        product.__post_init__()
+        product.increment_version()
+        self.repository.save(product)
+        return product

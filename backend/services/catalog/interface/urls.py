@@ -5,9 +5,12 @@ from backend.services.catalog.interface.views import (
     ServiceListCreateView,
     ServiceDetailView,
     SalaryRatesView,
+    ProductListCreateView,
+    ProductDetailView,
     InternalServicesView,
     InternalRateView,
     InternalCategoriesView,
+    InternalProductsView,
 )
 
 urlpatterns = [
@@ -18,6 +21,10 @@ urlpatterns = [
     path("api/v1/catalog/services/<uuid:service_id>/", ServiceDetailView.as_view(), name="v1-service-detail"),
     path("api/v1/catalog/rates/", SalaryRatesView.as_view(), name="v1-rates"),
     path("api/v1/catalog/rates/<uuid:service_id>/", SalaryRatesView.as_view(), name="v1-rate-detail"),
+    path("api/v1/catalog/products/", ProductListCreateView.as_view(), name="v1-products"),
+    path("api/v1/catalog/products/<uuid:product_id>/", ProductDetailView.as_view(), name="v1-product-detail"),
+    path("api/main/products/", ProductListCreateView.as_view(), name="legacy-products"),
+    path("api/main/products/<uuid:product_id>/", ProductDetailView.as_view(), name="legacy-product-detail"),
 
     # Legacy Aliases (TZ_CRM_SERVICES_SPHERE Section 5)
     path("api/barbershop/service-categories/", CategoryListCreateView.as_view(), name="legacy-categories"),
@@ -31,4 +38,5 @@ urlpatterns = [
     path("internal/v1/categories/", InternalCategoriesView.as_view(), name="internal-categories"),
     path("internal/v1/services/", InternalServicesView.as_view(), name="internal-services"),
     path("internal/v1/rates/<uuid:service_id>/", InternalRateView.as_view(), name="internal-rate"),
+    path("internal/v1/products/", InternalProductsView.as_view(), name="internal-products"),
 ]

@@ -75,6 +75,9 @@
 #### Внутренний API catalog-service:
 - `GET /internal/v1/services/?company_id=...&service_ids=id1,id2` — получение цен и длительностей услуг для фиксации snapshot в записи
 - `GET /internal/v1/rates/{service_id}/?company_id=...&master_id=...` — получение % ставки для начисления зарплаты
+- `GET /internal/v1/products/?company_id=...&product_ids=id1,id2` — получение активных товаров и цен для POS
+
+Товары доступны через `GET, POST /api/v1/catalog/products/` и `GET, PATCH /api/v1/catalog/products/{id}/`. Создание и изменение доступны владельцу, администратору и поддержке; себестоимость не возвращается обычным пользователям.
 
 ---
 
@@ -163,3 +166,27 @@
 | :--- | :--- | :--- | :--- |
 | `WebSocket` | `/ws` (или `?token=...`) | Авторизован | Двунаправленный канал мгновенных событий и блокировок |
 | `SSE` | `/sse` | Авторизован | Резервный поток серверных событий |
+
+---
+
+### 2.10. inventory-service
+
+| Метод | Путь v1 | Legacy Алиас | Доступ | Назначение |
+| :--- | :--- | :--- | :--- | :--- |
+| `GET` | `/api/v1/inventory/stock/` | `/api/main/warehouse/stock/` | Авторизован | Остатки по товару и филиалу |
+| `POST` | `/api/v1/inventory/movements/` | `/api/main/warehouse/movements/` | Владелец, Админ, Поддержка | Приход, возврат или списание товара |
+
+#### Внутренний API inventory-service:
+- `POST /internal/v1/reservations/` — идемпотентно резервирует количество в остатках.
+- `POST /internal/v1/reservations/{id}/commit/` — подтверждает резерв и списывает товар.
+- `POST /internal/v1/reservations/{id}/release/` — освобождает незавершенный резерв.
+
+### 2.11. pos-service
+
+| Метод | Путь v1 | Legacy Алиас | Доступ | Назначение |
+| :--- | :--- | :--- | :--- | :--- |
+| `GET` | `/api/v1/pos/sales/` | `/api/main/pos/sales/` | Кассир, Владелец, Админ или `can_view_cashbox` | Список продаж |
+| `POST` | `/api/v1/pos/sales/` | `/api/main/pos/checkout/`, `/api/main/pos/sales/` | Кассир, Владелец, Админ или `can_view_cashbox` | Оформление продажи |
+| `GET` | `/api/v1/pos/sales/{id}/` | `/api/main/pos/sales/{id}/` | Кассир, Владелец, Админ или `can_view_cashbox` | Детали продажи |
+
+Checkout принимает `items` с `product_id`, `quantity`, `unit_code` и необязательными `variant_id`, `branch_id`, `location_code`, `discount`; все строки одной продажи должны относиться к одному филиалу. Заголовок `Idempotency-Key` обязателен. Статусы продажи: `pending_inventory`, `completed`, `rejected`. POS вызывает Catalog и Inventory через внутренние подписанные API; внутренние маршруты не публикуются через Nginx.

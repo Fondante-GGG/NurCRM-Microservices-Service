@@ -3,9 +3,14 @@ import uuid
 from decimal import Decimal
 
 from libs.common.domain import Money
-from backend.services.catalog.domain.models import ServiceCategory, Service, SalaryRate
+from backend.services.catalog.domain.models import ServiceCategory, Service, SalaryRate, Product
 from backend.services.catalog.domain.repositories import ServiceCategoryRepository, ServiceRepository, SalaryRateRepository
-from backend.services.catalog.infrastructure.models import ServiceCategoryModel, ServiceModel, SalaryRateModel
+from backend.services.catalog.infrastructure.models import (
+    ProductModel,
+    ServiceCategoryModel,
+    ServiceModel,
+    SalaryRateModel,
+)
 
 
 class DjangoServiceCategoryRepository(ServiceCategoryRepository):
@@ -140,4 +145,58 @@ class DjangoSalaryRateRepository(SalaryRateRepository):
             service_id=rate.service_id,
             master_id=rate.master_id,
             defaults={"percent": rate.percent},
+        )
+
+
+class DjangoProductRepository:
+    def _to_domain(self, model: ProductModel) -> Product:
+        return Product(
+            id=model.id,
+            company_id=model.company_id,
+            name=model.name,
+            sku=model.sku,
+            category=model.category,
+            price=Money(model.price),
+            cost_price=Money(model.cost_price),
+            wholesale_price=Money(model.wholesale_price) if model.wholesale_price is not None else None,
+            unit_code=model.unit_code,
+            minimum_quantity=model.minimum_quantity,
+            quantity_step=model.quantity_step,
+            attributes=model.attributes,
+            is_active=model.is_active,
+            version=model.version,
+        )
+
+    def get_by_id(self, company_id: uuid.UUID, product_id: uuid.UUID) -> Optional[Product]:
+        model = ProductModel.objects.filter(company_id=company_id, id=product_id).first()
+        return self._to_domain(model) if model else None
+
+    def list_by_company(self, company_id: uuid.UUID, active_only: bool = False) -> List[Product]:
+        query = ProductModel.objects.filter(company_id=company_id).order_by("name", "id")
+        if active_only:
+            query = query.filter(is_active=True)
+        return [self._to_domain(model) for model in query]
+
+    def list_by_ids(self, company_id: uuid.UUID, product_ids: List[uuid.UUID]) -> List[Product]:
+        query = ProductModel.objects.filter(company_id=company_id, id__in=product_ids, is_active=True)
+        return [self._to_domain(model) for model in query]
+
+    def save(self, product: Product) -> None:
+        ProductModel.objects.update_or_create(
+            id=product.id,
+            defaults={
+                "company_id": product.company_id,
+                "name": product.name,
+                "sku": product.sku,
+                "category": product.category,
+                "price": product.price.amount,
+                "cost_price": product.cost_price.amount,
+                "wholesale_price": product.wholesale_price.amount if product.wholesale_price else None,
+                "unit_code": product.unit_code,
+                "minimum_quantity": product.minimum_quantity,
+                "quantity_step": product.quantity_step,
+                "attributes": product.attributes,
+                "is_active": product.is_active,
+                "version": product.version,
+            },
         )

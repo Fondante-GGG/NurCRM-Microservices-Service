@@ -7,7 +7,7 @@ help: ## Show this help message
 test: test-py test-go ## Run all automated tests (Python & Go)
 
 test-py: ## Run Python domain and use-case unit tests
-	PYTHONPATH=backend:. backend/.venv/bin/pytest -v backend/tests/test_domain_and_use_cases.py
+	PYTHONPATH=backend:. backend/.venv/bin/pytest -v backend/tests/test_domain_and_use_cases.py backend/tests/test_pos_inventory.py
 
 test-go: ## Run Go availability engine unit tests
 	cd services/public-gateway && go test -v ./...

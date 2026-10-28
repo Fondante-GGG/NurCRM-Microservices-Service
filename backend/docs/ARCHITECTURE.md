@@ -14,14 +14,16 @@
 
 Все сервисы подключены к единой СУБД PostgreSQL 16, но с категорическим разделением по логическим схемам и ролям доступа:
 1. `auth` (роль `svc_auth`) — `companies`, `employees`, `sessions`, `outbox`, `inbox`
-2. `catalog` (роль `svc_catalog`) — `service_categories`, `services`, `salary_rates`, `outbox`, `inbox`
+2. `catalog` (роль `svc_catalog`) — `service_categories`, `services`, `salary_rates`, `products`, `outbox`, `inbox`
 3. `clients` (роль `svc_clients`) — `clients`, `client_documents`, `outbox`, `inbox`
-4. `schedule` (роль `svc_schedule`) — `appointments`, `master_schedules`, `outbox`, `inbox`
-5. `booking` (роль `svc_booking`) — `booking_requests`, `outbox`, `inbox`
-6. `finance` (роль `svc_finance`) — `accruals`, `salary_payouts`, `cash_shifts`, `warehouse_materials`, `inventory_movements`, `outbox`, `inbox`
-7. `analytics` (роль `svc_analytics`) — витрины и агрегаты `daily_metrics`, `outbox`, `inbox`
-8. `notify` (роль `svc_notify`) — `notifications`, `scheduled_reminders`, `outbox`, `inbox`
-9. `admin` (роль `svc_admin`) — `audit_logs` и доступ на чтение для поддержки
+4. `inventory` (роль `svc_inventory`) — `stock_balances`, `stock_movements`, `stock_reservations`, `outbox`, `inbox`
+5. `pos` (роль `svc_pos`) — `sales`, `sale_lines`, `outbox`, `inbox`
+6. `schedule` (роль `svc_schedule`) — `appointments`, `master_schedules`, `outbox`, `inbox`
+7. `booking` (роль `svc_booking`) — `booking_requests`, `outbox`, `inbox`
+8. `finance` (роль `svc_finance`) — `accruals`, `salary_payouts`, `cash_shifts`, `warehouse_materials`, `inventory_movements`, `outbox`, `inbox`
+9. `analytics` (роль `svc_analytics`) — витрины и агрегаты `daily_metrics`, `outbox`, `inbox`
+10. `notify` (роль `svc_notify`) — `notifications`, `scheduled_reminders`, `outbox`, `inbox`
+11. `admin` (роль `svc_admin`) — `audit_logs` и доступ на чтение для поддержки
 
 ### Правила изоляции:
 - **Никаких JOIN и Foreign Key между схемами**: связи хранятся строго через `UUID` (`client_id`, `barber_id`, `service_id`).
@@ -41,7 +43,9 @@ WHERE (status IN ('booked','confirmed','completed'));
 | Сервис | Стек | Роль и ответственность |
 | :--- | :--- | :--- |
 | **auth-service** | DRF + PyJWT (RS256) | Компании, сотрудники, сессии, роли и права, JWKS (`/.well-known/jwks.json`) |
-| **catalog-service** | DRF | Категории услуг, услуги, процентные ставки мастеров |
+| **catalog-service** | DRF | Категории и услуги, товары, процентные ставки мастеров |
+| **inventory-service** | DRF | Товарные остатки по филиалам и местам хранения, движения и резервирование |
+| **pos-service** | DRF | Оформление продаж, идемпотентность и межсервисный checkout |
 | **client-service** | DRF | Клиентская база, безопасное файловое хранилище документов (`/var/lib/crm/media/clients/...`), история визитов |
 | **schedule-service** | DRF | Расписание, журнал визитов, контроль пересечений, жизненный цикл записей, занятые интервалы |
 | **booking-service** | DRF | Прием заявок, оркестрация Саги подтверждения (клиент + запись) |
@@ -70,6 +74,14 @@ WHERE (status IN ('booked','confirmed','completed'));
 3. `finance-service` получает событие, запрашивает процент мастера у `catalog-service` и начисляет:
    $$\text{Начисление} = \text{Цена} \times \left(\frac{\text{Процент ставки}}{100}\right)$$
 4. Благодаря уникальности поля `appointment_id` в таблице `finance.accruals`, повторные события исключают дублирование зарплаты.
+
+### Сага 3: Продажа товара (`pos-service`)
+1. POS проверяет товары и цены через внутренний API `catalog-service`.
+2. `inventory-service` создает идемпотентное резервирование остатков; если доступного количества недостаточно, продажа отклоняется.
+3. POS сохраняет идентификатор резерва, подтверждает списание в Inventory и переводит продажу из `pending_inventory` в `completed`.
+4. Повторный запрос с тем же `Idempotency-Key` и тем же телом возвращает существующую продажу; ключ с другим телом возвращает конфликт. Событие `pos.sale.completed` записывается в outbox POS в транзакции.
+
+Роли `svc_pos`, `svc_inventory` и `svc_catalog` не получают прямого доступа к чужим схемам: POS взаимодействует с каталогом и остатками только через подписанные внутренние HTTP-запросы.
 
 ---
 
