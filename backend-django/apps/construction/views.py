@@ -654,6 +654,9 @@ class CashFlowWriteAccess(permissions.BasePermission):
             return False
         if request.method in permissions.SAFE_METHODS or is_privileged(user) or has_any_flag(user, ["can_view_cashbox"]):
             return True
+        from apps.users.permissions_flags import _legacy_client
+        if _legacy_client(request):
+            return True  # горячая правка 29.10: старые кассы и сайт — как до Н-16
         if request.method == "POST":
             data = request.data if hasattr(request.data, "get") else {}
             # операции ящика смены: привязку к своей открытой смене проверяет сериализатор (400 shift)
@@ -678,6 +681,9 @@ class CashFlowWriteAccess(permissions.BasePermission):
         user = request.user
         if request.method in permissions.SAFE_METHODS or is_privileged(user) or has_any_flag(user, ["can_view_cashbox"]):
             return True
+        from apps.users.permissions_flags import _legacy_client
+        if _legacy_client(request):
+            return True  # горячая правка 29.10
         shift = getattr(obj, "shift", None)
         if shift is not None and shift.cashier_id == user.id:
             return True
@@ -846,6 +852,9 @@ class CashFlowListCreateView(CompanyBranchScopedMixin, generics.ListCreateAPIVie
         return super().create(request, *args, **kwargs)
 
     def perform_create(self, serializer):
+        if (self.request.data.get("kind") or "") == "startup":
+            from apps.main.tz1029_invest import ensure_finance_open  # ТЗ 29.10 Б-100
+            ensure_finance_open(self._company(), timezone.now())
         _ensure_cash_period_open(self.request, self._company(), [timezone.now()])
         self._inject_company_branch_on_save(serializer)
         from apps.construction.audit import log_cashflow, cashflow_snapshot
@@ -867,10 +876,18 @@ class CashFlowDetailView(CompanyBranchScopedMixin, generics.RetrieveUpdateDestro
     def get_queryset(self):
         return self._scoped_queryset(super().get_queryset())
 
+    @staticmethod
+    def _ensure_finance_open(request, instance):
+        # ТЗ 29.10 Б-100: стартовые расходы в закрытом периоде — только чтение (409)
+        if instance.kind == "startup" or (request.method in ("PUT", "PATCH") and request.data.get("kind") == "startup"):
+            from apps.main.tz1029_invest import ensure_finance_open
+            ensure_finance_open(instance.company, instance.created_at)
+
     @transaction.atomic
     def update(self, request, *args, **kwargs):
         instance = self.get_object()
         old_status = instance.status
+        self._ensure_finance_open(request, instance)
         _ensure_cash_period_open(request, instance.company, [instance.created_at])
 
         # Если это заявка на редактирование или отмену
@@ -897,6 +914,7 @@ class CashFlowDetailView(CompanyBranchScopedMixin, generics.RetrieveUpdateDestro
 
     def destroy(self, request, *args, **kwargs):
         instance = self.get_object()
+        self._ensure_finance_open(request, instance)
         _ensure_cash_period_open(request, instance.company, [instance.created_at])
         from apps.construction.audit import log_cashflow, cashflow_snapshot
         log_cashflow(request, instance, "delete", before=cashflow_snapshot(instance))
