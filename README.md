@@ -140,3 +140,17 @@ make test-go
 ├── docker-compose.yml          # Корневой запуск
 └── README.md
 ```
+
+---
+
+## 🔗 Связь с основным бэкендом NurCRM (Django)
+
+Маркет, касса и склад пока работают в основном бэкенде [isko18/NurCRM](https://github.com/isko18/NurCRM). Правки к нему за 20–29.10.2026 открыты как PR:
+
+- [#2](https://github.com/isko18/NurCRM/pull/2) — цены кассы
+- [#3](https://github.com/isko18/NurCRM/pull/3) — все серверные правки 20–28.10 (ТЗ-28, ТЗ 11–12, Н-01…Н-33, Б-01…Б-87)
+- [#4](https://github.com/isko18/NurCRM/pull/4) — аренда помещений
+- [#5](https://github.com/isko18/NurCRM/pull/5) — PLU и штрихкоды архива, номер чека, фискальный чек eKassa
+- [#6](https://github.com/isko18/NurCRM/pull/6) — фото глобального каталога
+
+Ветки по отдельности: [YTArmen/NurCRM](https://github.com/YTArmen/NurCRM/branches). Подробная сводка: [`backend/docs/MONOLITH_CHANGES_2026-10.txt`](backend/docs/MONOLITH_CHANGES_2026-10.txt).

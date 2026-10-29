@@ -1,0 +1,116 @@
+ИЗМЕНЕНИЯ БЭКЕНДА NurCRM (Умар + Claude), 20–29.10.2026
+=========================================================
+
+Все PR открыты в isko18/NurCRM. Основа всех PR — ветка
+feature/summary-products-aggregation (коммит fbf8eeb4, она стоит на сервере).
+PR сделаны для просмотра, сливать по желанию.
+
+PR
+--
+#2  Цены кассы (Б-06, Б-46 лента products/changes/, часть Б-03)
+    https://github.com/isko18/NurCRM/pull/2
+#3  ВСЕ серверные правки 20–28.10 одной веткой (158 коммитов, 374 файла)
+    https://github.com/isko18/NurCRM/pull/3
+#4  Аренда помещений (apps/arenda), этапы 1–6
+    https://github.com/isko18/NurCRM/pull/4
+#5  Архив освобождает PLU и штрихкоды; номер чека; фискальный чек eKassa
+    https://github.com/isko18/NurCRM/pull/5
+#6  Фото глобального каталога (apps/catalog_media)
+    https://github.com/isko18/NurCRM/pull/6
+
+Все ветки по отдельности: https://github.com/YTArmen/NurCRM/branches
+(feature/tz*, tz26-*, fix/urgent-*, feature/arenda*, ...)
+
+
+ЧТО ВНУТРИ PR #3
+----------------
+1. ТЗ-28 и «Бухгалтер»
+   - статьи денег, остатки касс: construction/cashboxes/balances/
+   - долги поставщикам: main/suppliers/payables/
+   - журнал construction/audit-log/, закрытый период, единый ApiError
+
+2. ТЗ 11–12 (касса)
+   - лимит долга проверяется на сервере, debt_limit в карточке клиента
+   - график долга в pos/checkout/ (debt_schedule, schedule_version)
+   - продажа упаковкой (sale_package_id)
+   - удалённые строки корзины веб-кассы пишутся в журнал
+   - GET main/pos/sale-items/ постранично (до 500)
+   - история товара main/products/{id}/history/, sales-velocity
+   - аналитика: часы и источники продаж, transactions по дням, tab=stock_items
+   - quantity как синоним qty, cash_received в checkout
+   - payment_method=transfer включает безнал банков
+   - date_from/date_to у pos/sales/ по времени Бишкека
+
+3. ТЗ «не сделанное» Н-01…Н-33
+   - выручка с предоплатой по долгу; отчёт смены (revenue_excl_debt и др.)
+   - возврат с долей скидки на чек, 409 refund_exceeds
+   - приход и оплата долга поставщику «из ящика смены»
+   - смена закупочной цены не меняет цену продажи
+   - автозакрытие смены, drawer_cash у касс
+   - заказы поставщику api/main/purchase-orders/
+   - права сотрудников на сервере (403 permission_denied)
+   - запросы «на кассу» pos/requests/
+   - лента изменений main/changes/ и WebSocket ws/company/
+   - ключи функций, company/features/, trial
+   - электронный чек (public-link, PDF), main/media/ с квотой
+   - витрина: pickup_code, размерные сетки, роли касс safe/bank
+
+4. Единое ТЗ 26.10, Б-01…Б-21
+   - core/api_compat: заголовок X-NurMarket-Client, capabilities, 404, invalid_param
+   - variant-stock-diff (только чтение), custom-item, items/bulk
+   - лимиты долга, ошибки 400/409 shift_closed / shift_not_owned
+
+5. Б-52…Б-87 (хозмаг, персонал, мобилка, ящик сообщений)
+   - дробное количество, единицы продажи sale_units, шаг и минимум
+   - уровни цен клиента, объекты клиента, лимит долга
+   - партии, бухты и обрезки
+   - задачи сотрудникам, график и табель, штрафы и премии
+   - источник и устройство продажи, ETag/304
+   - задания печати чека (PrintJob), отложенные чеки, сеансы сканера
+   - отчёт stock_health, журнал действий ИИ
+   - каналы ящика сообщений apps/inbox (секреты AES-GCM)
+
+6. Поддержка и тарифы
+   - «Забыли пароль?» -> заявка в бота поддержки
+   - users/support/company-features/
+   - конструктор тарифа «По договору», лимит сотрудников
+
+НЕ ДОДЕЛАНО
+  - Б-78…Б-86 (ИИ-ответчик, чат витрины, шаблоны WA, Meta/Instagram,
+    рассылки, воронка): WIP, проходят 67 из 73 тестов
+  - Б-55/Б-56: не все тесты досчитаны
+
+Подробности: CHANGELOG.md и docs/ в ветке PR #3.
+
+
+PR #4 — АРЕНДА
+--------------
+  - этап 1: модели, миграция, доступы, API, начисления и долг
+  - этап 2 «Деньги»: оплаты с пеней, сторно, чеки, взыскания, акты сверки
+  - этап 3: договоры и шаблоны (импорт .docx/.txt, PDF/DOCX, трудовые)
+  - этап 4: расходы, налоговый календарь, амортизация, итог месяца, зарплата
+  - этапы 5–6: доступы по филиалам, сеансы, блокировка входа, журнал,
+    уведомления, автонапоминания, аналитика
+  В settings добавлено только 'apps.arenda'.
+
+PR #5 — ТОВАРЫ И ЧЕК
+--------------------
+  - товар в архиве освобождает PLU и штрихкоды
+  - номер чека из doc_number (раньше печатался uuid продажи)
+  - eKassa: печатается готовый фискальный чек ГНС (txt от eKassa)
+
+PR #6 — ФОТО КАТАЛОГА
+---------------------
+  - приложение apps.catalog_media, поля image_url / image_source
+  - команда fill_global_photos
+
+
+МИКРОСЕРВИСЫ СФЕРЫ УСЛУГ (отдельный репозиторий)
+------------------------------------------------
+https://github.com/YTArmen/NurCRM-Microservices-Service  (приватный)
+Новая платформа для сферы услуг: Python (DRF/FastAPI) + Go-шлюзы,
+PostgreSQL 16, RabbitMQ, Redis, Nginx, Docker Compose.
+Сервисы: auth, catalog, client, schedule, booking, finance, analytics,
+notification, admin-panel, inventory, pos, public-gateway, realtime-gateway.
+Фронт front-usluga подключён к этим сервисам.
+Ветки: main и feature/pos-inventory-services (POS и склад, 29.10).
