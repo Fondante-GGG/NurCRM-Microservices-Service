@@ -21,6 +21,12 @@ import { RequestsScreen } from "./requests";
 import { DocumentsScreen } from "./documents";
 import { InventoryScreen } from "./inventory";
 import { SettingsScreen } from "./settings";
+import { BathInsideScreen } from "./banya/vnutri";
+import { BathBarScreen } from "./banya/bar";
+import { BathMasterServicesScreen } from "./banya/uslugi";
+import { BathCheckoutScreen } from "./banya/vyhod";
+import { CommercialChessboardScreen } from "./arenda/shahmatka";
+import { CommercialReconciliationScreen } from "./arenda/sverka";
 
 // Какой экран открывает каждый пункт меню «Услуги».
 function ServicesTab() {
@@ -48,6 +54,20 @@ const SCREENS: Record<string, ComponentType> = {
   "dokumenty-klientov": DocumentsScreen,
   sklad: InventoryScreen,
   nastrojki: SettingsScreen,
+  // Баня и сауна
+  vnutri: BathInsideScreen,
+  vhod: BathInsideScreen,
+  bar: BathBarScreen,
+  "uslugi-masterov": BathMasterServicesScreen,
+  komnaty: JournalScreen,
+  vyhod: BathCheckoutScreen,
+  katalog: ServicesTab,
+  // Аренда помещений
+  shahmatka: CommercialChessboardScreen,
+  arendatory: ClientsScreen,
+  dogovory: DocumentsScreen,
+  sverka: CommercialReconciliationScreen,
+  rashody: CashScreen,
 };
 
 export function Screen({ page }: { page: string }) {
