@@ -2,22 +2,32 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
 import uuid
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
+from django.db import IntegrityError
 
 from libs.common.auth import verify_token, verify_internal_service_request
-from libs.common.exceptions import UnauthorizedError, ForbiddenError, CRMException, NotFoundError
+from libs.common.exceptions import (
+    ConflictError,
+    CRMException,
+    NotFoundError,
+    UnauthorizedError,
+    ValidationError as CRMValidationError,
+)
 from libs.common.response import error_response
 from libs.common.pagination import PaginationParams, paginate_results
 from backend.services.catalog.application.dto import CreateServiceDTO, UpdateServiceDTO
 from backend.services.catalog.application.use_cases import (
     CreateCategoryUseCase,
+    CreateProductUseCase,
     CreateServiceUseCase,
     UpdateServiceUseCase,
+    UpdateProductUseCase,
     SetSalaryRateUseCase,
 )
 from backend.services.catalog.infrastructure.uow import DjangoCatalogUnitOfWork
 from backend.services.catalog.infrastructure.repositories import (
     DjangoServiceCategoryRepository,
+    DjangoProductRepository,
     DjangoServiceRepository,
     DjangoSalaryRateRepository,
 )
@@ -316,3 +326,169 @@ class InternalRateView(APIView):
             return Response({"percent": percent})
         except CRMException as e:
             return Response(error_response(e.code, e.message, e.details), status=e.status_code)
+
+
+def _product_response(product, include_cost: bool = False):
+    result = {
+        "id": str(product.id),
+        "name": product.name,
+        "sku": product.sku,
+        "category": product.category,
+        "price": str(product.price.amount),
+        "wholesale_price": str(product.wholesale_price.amount) if product.wholesale_price else None,
+        "unit_code": product.unit_code,
+        "minimum_quantity": str(product.minimum_quantity),
+        "quantity_step": str(product.quantity_step),
+        "attributes": product.attributes,
+        "is_active": product.is_active,
+        "version": product.version,
+    }
+    if include_cost:
+        result["cost_price"] = str(product.cost_price.amount)
+    return result
+
+
+def _decimal_value(data, field_name: str, default=None):
+    value = data.get(field_name, default)
+    if value is None:
+        return None
+    try:
+        return Decimal(str(value))
+    except (InvalidOperation, TypeError, ValueError):
+        raise CRMValidationError(f"{field_name} must be a decimal number")
+
+
+class ProductListCreateView(APIView):
+    def get(self, request):
+        try:
+            user = get_current_user_from_request(request)
+            products = DjangoProductRepository().list_by_company(
+                uuid.UUID(user.company_id),
+                active_only=request.query_params.get("active_only", "").lower() == "true",
+            )
+            params = PaginationParams.from_request_params(
+                request.query_params.get("limit"), request.query_params.get("offset")
+            )
+            page = products[params.offset : params.offset + params.limit]
+            include_cost = user.role in ("owner", "admin", "support")
+            return Response(paginate_results(
+                [_product_response(product, include_cost=include_cost) for product in page],
+                len(products),
+                params,
+            ))
+        except CRMException as e:
+            return Response(error_response(e.code, e.message, e.details), status=e.status_code)
+        except (ValueError, TypeError):
+            return Response(error_response("validation_error", "Invalid company identifier"), status=400)
+
+    def post(self, request):
+        try:
+            user = get_current_user_from_request(request)
+            if user.role not in ("owner", "admin", "support"):
+                return Response(error_response("forbidden", "Only owner, admin, or support can create products"), status=403)
+            data = request.data
+            if not isinstance(data, dict):
+                raise CRMValidationError("A product object is required")
+            attributes = data.get("attributes", {})
+            if not isinstance(attributes, dict):
+                raise CRMValidationError("attributes must be an object")
+
+            product = CreateProductUseCase(DjangoProductRepository()).execute(
+                company_id=uuid.UUID(user.company_id),
+                name=str(data.get("name", "")),
+                sku=str(data.get("sku", "")),
+                category=str(data.get("category", "")),
+                price=_decimal_value(data, "price", "0"),
+                cost_price=_decimal_value(data, "cost_price", "0"),
+                wholesale_price=_decimal_value(data, "wholesale_price"),
+                unit_code=str(data.get("unit_code", "pcs")),
+                minimum_quantity=_decimal_value(data, "minimum_quantity", "1"),
+                quantity_step=_decimal_value(data, "quantity_step", "1"),
+                attributes=attributes,
+                is_active=data.get("is_active", True),
+            )
+            return Response(_product_response(product, include_cost=True), status=status.HTTP_201_CREATED)
+        except IntegrityError:
+            error = ConflictError("SKU already exists for this company", code="duplicate_sku")
+            return Response(error_response(error.code, error.message), status=error.status_code)
+        except CRMException as e:
+            return Response(error_response(e.code, e.message, e.details), status=e.status_code)
+        except (ValueError, TypeError):
+            return Response(error_response("validation_error", "Invalid product data"), status=400)
+
+
+class ProductDetailView(APIView):
+    def get(self, request, product_id):
+        try:
+            user = get_current_user_from_request(request)
+            product = DjangoProductRepository().get_by_id(
+                uuid.UUID(user.company_id), uuid.UUID(str(product_id))
+            )
+            if product is None:
+                raise NotFoundError(f"Product {product_id} not found")
+            return Response(_product_response(
+                product,
+                include_cost=user.role in ("owner", "admin", "support"),
+            ))
+        except CRMException as e:
+            return Response(error_response(e.code, e.message, e.details), status=e.status_code)
+        except (ValueError, TypeError):
+            return Response(error_response("validation_error", "Invalid product identifier"), status=400)
+
+    def patch(self, request, product_id):
+        try:
+            user = get_current_user_from_request(request)
+            if user.role not in ("owner", "admin", "support"):
+                return Response(error_response("forbidden", "Only owner, admin, or support can update products"), status=403)
+            data = request.data
+            if not isinstance(data, dict):
+                raise CRMValidationError("A product object is required")
+            if "attributes" in data and not isinstance(data["attributes"], dict):
+                raise CRMValidationError("attributes must be an object")
+            values = {
+                field_name: data[field_name]
+                for field_name in ("name", "sku", "category", "unit_code", "attributes", "is_active")
+                if field_name in data
+            }
+            for field_name in ("price", "cost_price", "wholesale_price", "minimum_quantity", "quantity_step"):
+                if field_name in data:
+                    values[field_name] = _decimal_value(data, field_name)
+            if values.get("wholesale_price", object()) is None:
+                values["wholesale_price"] = None
+
+            if_match = request.headers.get("If-Match")
+            expected_version = int(if_match) if if_match and if_match.isdigit() else data.get("expected_version")
+            product = UpdateProductUseCase(DjangoProductRepository()).execute(
+                uuid.UUID(user.company_id),
+                uuid.UUID(str(product_id)),
+                expected_version=expected_version,
+                values=values,
+            )
+            return Response(_product_response(product, include_cost=True))
+        except IntegrityError:
+            error = ConflictError("SKU already exists for this company", code="duplicate_sku")
+            return Response(error_response(error.code, error.message), status=error.status_code)
+        except CRMException as e:
+            return Response(error_response(e.code, e.message, e.details), status=e.status_code)
+        except (ValueError, TypeError):
+            return Response(error_response("validation_error", "Invalid product data"), status=400)
+
+
+class InternalProductsView(APIView):
+    def get(self, request):
+        try:
+            verify_internal_service_request(request, "catalog-service")
+            company_id = uuid.UUID(request.query_params.get("company_id", ""))
+            product_ids = [
+                uuid.UUID(value.strip())
+                for value in request.query_params.get("product_ids", "").split(",")
+                if value.strip()
+            ]
+            if not product_ids or len(product_ids) > 200:
+                raise CRMValidationError("product_ids must contain between 1 and 200 identifiers")
+            products = DjangoProductRepository().list_by_ids(company_id, product_ids)
+            return Response([_product_response(product) for product in products])
+        except CRMException as e:
+            return Response(error_response(e.code, e.message, e.details), status=e.status_code)
+        except (ValueError, TypeError):
+            return Response(error_response("validation_error", "Invalid company or product identifier"), status=400)

@@ -6,10 +6,12 @@
 - **ОС:** Linux (Ubuntu 22.04+ / Debian 12+) или macOS
 - **Порты по умолчанию:**
   - `80`: Единый Nginx Gateway (входная точка для SPA, виджета и мобильных клиентов)
-  - `5432`: PostgreSQL 16 (схемы: `auth`, `catalog`, `clients`, `schedule`, `booking`, `finance`, `analytics`, `notify`, `admin`)
+  - `5432`: PostgreSQL 16 (схемы: `auth`, `catalog`, `clients`, `inventory`, `pos`, `schedule`, `booking`, `finance`, `analytics`, `notify`, `admin`)
   - `6379`: Redis 7
   - `5672` / `15672`: RabbitMQ 3
   - `8000`: Django Admin Panel (внутренний порт)
+  - `8009`: Inventory Service (внутренний порт)
+  - `8011`: POS Service (внутренний порт)
   - `8010`: Public Gateway (Go)
   - `8020`: Realtime Gateway WebSocket/SSE (Go)
 
@@ -32,9 +34,18 @@ docker compose ps
 ### Просмотр логов любого сервиса:
 ```bash
 docker compose logs -f gateway
+docker compose logs -f pos-service
+docker compose logs -f inventory-service
 docker compose logs -f schedule-service
 docker compose logs -f public-gateway
 ```
+
+### Обновление существующей базы данных
+Инициализационные SQL-файлы Docker выполняются автоматически только при создании пустого тома PostgreSQL. Для уже работающего экземпляра примените POS/Inventory-схемы отдельно:
+```bash
+docker compose exec -T postgres psql -U postgres -d nurcrm < ./init-db/04_pos_inventory.sql
+```
+Команда выполняется из `backend/deploy` (путь к файлу: `./init-db/04_pos_inventory.sql`). Скрипт идемпотентен и создает роли, таблицу товаров, остатки, продажи и необходимые права.
 
 ---
 
@@ -44,6 +55,7 @@ docker compose logs -f public-gateway
 Выполните SQL-скрипт инициализации схем, ролей и расширений:
 ```bash
 psql -h localhost -U postgres -d nurcrm -f backend/deploy/init-db/01_init.sql
+psql -h localhost -U postgres -d nurcrm -f backend/deploy/init-db/04_pos_inventory.sql
 ```
 
 ### 3.2. Виртуальное окружение Python
@@ -78,7 +90,7 @@ cd backend/services/scheduler-worker && go run ./cmd/main.go
 
 ### Тесты Python (Clean Architecture, домен, инварианты, саги):
 ```bash
-PYTHONPATH="backend:." backend/.venv/bin/pytest -v backend/tests/test_domain_and_use_cases.py
+PYTHONPATH="backend:." backend/.venv/bin/pytest -v backend/tests/test_domain_and_use_cases.py backend/tests/test_pos_inventory.py
 ```
 
 ### Тесты Go (Availability Engine, Union calculation):

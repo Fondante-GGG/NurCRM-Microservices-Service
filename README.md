@@ -9,7 +9,7 @@
 - **Языки программирования:** Python 3.11 (DRF, FastAPI, PyJWT, Pydantic v2), Go 1.22 (чистый Go, gorilla/websocket, pgx/pq).
 - **База данных:** PostgreSQL 16 с расширениями `uuid-ossp` и `btree_gist` (GiST exclusion constraint `no_overlap`).
 - **События и сообщения:** Transactional Outbox / Inbox, RabbitMQ 3, Redis 7 Pub/Sub.
-- **Шлюз и оркестрация:** Nginx Gateway (порт 80), Docker Compose (единый запуск 16 контейнеров).
+- **Шлюз и оркестрация:** Nginx Gateway (порт 80), Docker Compose (единый запуск 19 контейнеров).
 - **Безопасность:** Асимметричные токены JWT (RS256) с автоматической валидацией через JWKS (`/.well-known/jwks.json`).
 
 ---
@@ -26,6 +26,8 @@
 [ public-gateway (Go) ]     [ realtime-gateway (Go) ]     [ REST Services (Python) ]
   • Виджет записи             • WebSockets (/ws)            • auth-service (:8001)
   • Свободные слоты           • SSE поток (/sse)            • catalog-service (:8002)
+                                                            • inventory-service (:8009)
+                                                            • pos-service (:8011)
   • Алгоритм «Любой мастер»   • Soft locks (edit:...)       • client-service (:8003)
                                                             • schedule-service (:8004)
                                                             • booking-service (:8005)
@@ -41,8 +43,8 @@
        ┌──────────────────────────────────────────────────────────────┴────────────────┐
        ▼                                                                               ▼
 [ PostgreSQL 16 ]                                                             [ Redis 7 / RabbitMQ 3 ]
-  9 изолированных схем (auth, catalog, clients, schedule,                       Кэш слотов, Pub/Sub,
-  booking, finance, analytics, notify, admin)                                   Очереди событий
+  11 изолированных схем (auth, catalog, clients, inventory, pos,                Кэш слотов, Pub/Sub,
+  schedule, booking, finance, analytics, notify, admin)                         Очереди событий
 ```
 
 ---
@@ -61,11 +63,12 @@
 git clone https://github.com/Fondante-GGG/NurCRM-Microservices.git
 cd NurCRM-Microservices
 
-# Запустите весь стек
+# Запустите весь стек из backend/deploy
+cd backend/deploy
 docker compose up -d
 ```
 
-Все 16 контейнеров запустятся автоматически. Доступные порты:
+Все 19 контейнеров запустятся автоматически. Доступные порты:
 - **API Gateway:** `http://localhost:80`
 - **Django Admin:** `http://localhost:80/admin/`
 - **JWKS Endpoint:** `http://localhost:80/.well-known/jwks.json`
@@ -85,7 +88,7 @@ docker compose down
 # Запуск всех тестов (Python + Go)
 make test
 
-# Только Python тесты доменных правил и саги бронирования
+# Python тесты доменных правил, бронирования и POS/Inventory
 make test-py
 
 # Только Go тесты алгоритма свободных слотов и объединения
@@ -99,7 +102,9 @@ make test-go
 | Сервис | Стек | Схема БД | Назначение |
 | :--- | :---: | :---: | :--- |
 | **auth-service** | DRF | `auth` | Регистрация компаний, сотрудников, выдача JWT RS256, JWKS |
-| **catalog-service** | DRF | `catalog` | Услуги, категории, процентные ставки мастеров |
+| **catalog-service** | DRF | `catalog` | Услуги, товары, категории, процентные ставки мастеров |
+| **inventory-service** | DRF | `inventory` | Остатки товаров, движения и резервирование для продаж |
+| **pos-service** | DRF | `pos` | Продажи с проверкой каталога и резервированием остатков |
 | **client-service** | DRF | `clients` | База клиентов, история визитов, защищённые файлы документов |
 | **schedule-service** | DRF | `schedule` | Расписание, GiST exclusion constraint `no_overlap`, автозавершение |
 | **booking-service** | DRF | `booking` | Заявки на бронь, распределённая Сага подтверждения |

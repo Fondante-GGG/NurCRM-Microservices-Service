@@ -1,6 +1,6 @@
 from typing import Optional, List, Protocol
 import uuid
-from backend.services.catalog.domain.models import ServiceCategory, Service, SalaryRate
+from backend.services.catalog.domain.models import ServiceCategory, Service, SalaryRate, Product
 
 
 class ServiceCategoryRepository(Protocol):
@@ -42,4 +42,18 @@ class SalaryRateRepository(Protocol):
         ...
 
     def save(self, rate: SalaryRate) -> None:
+        ...
+
+
+class ProductRepository(Protocol):
+    def get_by_id(self, company_id: uuid.UUID, product_id: uuid.UUID) -> Optional[Product]:
+        ...
+
+    def list_by_company(self, company_id: uuid.UUID, active_only: bool = False) -> List[Product]:
+        ...
+
+    def list_by_ids(self, company_id: uuid.UUID, product_ids: List[uuid.UUID]) -> List[Product]:
+        ...
+
+    def save(self, product: Product) -> None:
         ...
