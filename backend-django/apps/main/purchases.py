@@ -12,7 +12,7 @@ POST /api/main/purchases/activate/ {key} → то же + activated:{feature, exp
   Подписывается канонический JSON всего тела без поля `signature`: UTF-8, ключи по возрастанию,
   без пробелов (separators ",", ":"), не-ASCII как есть (ensure_ascii=False).
   Ed25519: alg "Ed25519", kid, signature — base64 (64 байта), signed_at — время подписи (ISO).
-  Ключи: каталог settings.PURCHASES_KEYS_DIR (по умолчанию /home/nur/keys/purchases, вне git):
+  Ключи: каталог settings.PURCHASES_KEYS_DIR (по умолчанию /etc/nurcrm/purchases-keys, вне git):
     keys.json {"active": "<kid>", "keys": [{"kid", "not_before", "not_after"}], "revoked_kids": []}
     <kid>.pem — закрытый ключ (PKCS8, права 600); для старых ключей можно оставить только <kid>.pub (raw 32 байта, base64).
 GET /api/main/purchases/keys/ — открытые ключи: {keys: [{kid, alg, public_key, not_before, not_after, active}], revoked_kids}.
@@ -40,7 +40,7 @@ ED_ALG = "Ed25519"
 
 
 def _keys_dir():
-    return getattr(settings, "PURCHASES_KEYS_DIR", "") or os.getenv("PURCHASES_KEYS_DIR", "/home/nur/keys/purchases")
+    return getattr(settings, "PURCHASES_KEYS_DIR", "") or os.getenv("PURCHASES_KEYS_DIR", "/etc/nurcrm/purchases-keys")
 
 
 def load_keyring():
