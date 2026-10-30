@@ -2,6 +2,14 @@
 
 Новые записи сверху. Единое ТЗ бэкенду 26.10.2026, разделы 8–11 (Б-52…Б-87).
 
+## 30.10.2026 — ТЗ Умару по проверке выкатки (касса)
+- №9 электронный чек по QR: `POST/DELETE api/main/pos/sales/{id}/share-link/` (идемпотентно, срок 90 дней, отзыв → 404), страница `https://app.nurcrm.kg/r/<token>` без входа (ru/ky/uz/tr/en, 360 px, PDF и печать), `/r/<token>.pdf`; в JSON чека адрес, телефон, кассир, бонусы, статус возврата; `share_url` в продаже; `X-Robots-Tag: noindex`, `/robots.txt`.
+- №10 возврат со скидкой: у строки продажи `refundable_quantity`, `refundable_amount`, `unit_refund_price`; в ответе возврата `refund.lines`; новая касса при превышении — `refund_exceeds_paid` с `{line_id, max_quantity, max_amount}`. Расчёт — `apps/main/refund_calc.py`. Отказы 001916/001909 были до выкатки Н-02 (29.10).
+- №11 чек из очереди при нулевом остатке: `allow_negative_stock: true` в `pos/checkout/` → продажа в минус и `stock_negative: [{product_id, variant_id, balance}]`.
+- «Поступления»: `suppliers/receipts/?product_id=`; у прихода `number`, `document_number`, `document_date`, `created_by`, `attachments[]`, `file`; у строки `batch_id`, `batch_number`, `batch_remaining`; `POST/DELETE suppliers/receipts/{id}/file/` (xlsx, xls, PDF, фото).
+- Миграции main 0160–0162 (0162 — номера старых приходов, на боевой с lock_timeout).
+- Файлы: apps/main/{receipt_share,refund_calc,receipt_files}.py, apps/main/{models,media_receipts,pos_views,pos_serializers,kassa_views,views,serializers,urls}.py, core/{urls,settings}.py.
+
 ## 27.10.2026 — Б-52…Б-77, Б-87 (слиты куски помощников)
 - Хозмаг: Б-52 дробное количество, unit_code, шаг и минимум (проверки под флагом hardware_2026_11); Б-53 единицы продажи sale_units (штрихкод, цена, коэффициент; продажа, возврат, приход, витрина); Б-54 public/sphere-profiles/ с профилем hardware; Б-55 уровни цен, цены по объёму, цена клиента (только новая касса + флаг); Б-56 прораб: лимит долга (409 credit_limit_exceeded под флагом), объекты; Б-57 атрибуты и фильтр attr.*; Б-58 ячейка хранения по филиалу; Б-59 сопутствующие и аналоги; Б-60 заказ покупателя (резерв, предоплата не выручка, выдача, отмена); Б-61 партии с оттенком и отрезной товар.
 - Голос и персонал: Б-62 задачи (приоритет, напоминание, отчёт, фильтры, summary, права исполнителя под is_strict); Б-63 штрафы/премии без денег, сменная ставка, market-salary/statement/; Б-64 график смен и табель; Б-65 журнал действий ИИ ai-actions/; Б-66 отчёт stock_health.
