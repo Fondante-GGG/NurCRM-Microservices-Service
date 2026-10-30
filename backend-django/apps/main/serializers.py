@@ -1698,7 +1698,8 @@ class ProductSerializer(CompanyBranchReadOnlyMixin, serializers.ModelSerializer)
         try:
             data["alternate_barcodes"] = [
                 {"barcode": item.barcode, "name": item.name, "quantity": item.quantity}
-                for item in instance.alternate_barcodes.order_by("barcode")
+                # sorted() по prefetch: .order_by() здесь делал запрос на каждый товар (30.10.2026)
+                for item in sorted(instance.alternate_barcodes.all(), key=lambda a: a.barcode or "")
             ]
         except Exception:
             data["alternate_barcodes"] = []
