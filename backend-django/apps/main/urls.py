@@ -47,6 +47,7 @@ from .document import SaleReceiptAPIView, SaleInvoiceAPIView
 from apps.main.showcase.size_charts import SizeChartListCreateAPIView, SizeChartDetailAPIView
 from apps.main.supplier_receipt_pdf import SupplierReceiptPdfAPIView
 from apps.main.media_receipts import MainMediaListCreateAPIView, MainMediaDetailAPIView, SalePublicLinkAPIView
+from apps.main.receipt_share import SaleShareLinkAPIView
 from apps.main.showcase.views_public import PublicCompanyShowcaseFacetsAPIView, PublicCompanyProductDetailAPIView, PublicCompanyAPIView, PublicCompanyShowcaseAPIView
 from apps.main.recommendations import (
     RecommendationEventsAPIView,
@@ -412,6 +413,7 @@ urlpatterns = [
     path("pos/checkout/", PosQuickCheckoutAPIView.as_view(), name="pos-quick-checkout"),
     path("pos/returns/", SaleReturnListAPIView.as_view(), name="pos-return-list"),
     path("pos/sales/<uuid:pk>/public-link/", SalePublicLinkAPIView.as_view(), name="pos-sale-public-link"),  # ТЗ Н-32
+    path("pos/sales/<uuid:pk>/share-link/", SaleShareLinkAPIView.as_view(), name="pos-sale-share-link"),  # ТЗ 30.10 №9
     path("media/", MainMediaListCreateAPIView.as_view(), name="main-media"),  # ТЗ Н-32
     path("media/<uuid:pk>/", MainMediaDetailAPIView.as_view(), name="main-media-detail"),
     path("pos/sales/<uuid:pk>/exchange/", SaleExchangeAPIView.as_view(), name="pos-sale-exchange"),

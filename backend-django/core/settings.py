@@ -729,3 +729,4 @@ CONSULTING_DEFAULT_CRM_SECTOR_ID = os.getenv("CONSULTING_DEFAULT_CRM_SECTOR_ID",
 # ТЗ Н-32: квота медиа-хранилища на компанию (МБ) и шаблон ссылки на электронный чек
 COMPANY_MEDIA_QUOTA_MB = int(os.getenv("COMPANY_MEDIA_QUOTA_MB", "500"))
 RECEIPT_PUBLIC_URL_TEMPLATE = os.getenv("RECEIPT_PUBLIC_URL_TEMPLATE", "https://market.nurcrm.kg/receipt/{token}")
+RECEIPT_SHARE_URL_TEMPLATE = os.getenv("RECEIPT_SHARE_URL_TEMPLATE", "https://app.nurcrm.kg/r/{token}")  # ТЗ 30.10 №9

@@ -12,11 +12,11 @@ Class-based views
     1. Add an import:  from other_app.views import Home
     2. Add a URL to urlpatterns:  path('', Home.as_view(), name='home')
 Including another URLconf
-    1. Import the include() function: from django.urls import include, path
+    1. Import the include() function: from django.urls import re_path, include, path
     2. Add a URL to urlpatterns:  path('blog/', include('blog.urls'))
 """
 from django.contrib import admin
-from django.urls import path, include
+from django.urls import path, include, re_path
 from django.conf.urls.static import static
 from django.conf import settings
 from .views_media_proxy import media_proxy
@@ -25,6 +25,7 @@ from .views_health import health_check
 from apps.main.telegram_bot.views_public import TelegramWebhookPublicView
 from apps.clientapp.landing import ReferralLandingView
 from apps.main.media_receipts import PublicReceiptAPIView, PublicReceiptPdfAPIView, PublicReceiptRatingAPIView
+from apps.main.receipt_share import PublicReceiptPageView, robots_txt  # ТЗ 30.10 №9
 
 if settings.ENABLE_API_DOCS:
     from rest_framework import permissions
@@ -81,6 +82,10 @@ api_urlpatterns = [
     path("api/public/", include("apps.main.tz26.public_urls")),  # ТЗ 26.10 Б-54 и др.: публичные адреса
     path("api/media-proxy/", media_proxy, name="media-proxy"),
     path("api/version/", ClientVersionView.as_view(), name="client-version"),
+    # ТЗ 30.10 №9: страница чека по QR (без входа) и запрет индексации
+    re_path(r"^r/(?P<token>[A-Za-z0-9_-]{16,64})\.(?P<fmt>pdf)$", PublicReceiptPageView.as_view(), name="receipt-share-pdf"),
+    re_path(r"^r/(?P<token>[A-Za-z0-9_-]{16,64})/?$", PublicReceiptPageView.as_view(), name="receipt-share-page"),
+    path("robots.txt", robots_txt, name="robots-txt"),
     path("api/public/receipts/<str:token>/", PublicReceiptAPIView.as_view(), name="public-receipt"),  # ТЗ Н-32
     path("api/public/receipts/<str:token>/pdf/", PublicReceiptPdfAPIView.as_view(), name="public-receipt-pdf"),
     path("api/public/receipts/<str:token>/rating/", PublicReceiptRatingAPIView.as_view(), name="public-receipt-rating"),

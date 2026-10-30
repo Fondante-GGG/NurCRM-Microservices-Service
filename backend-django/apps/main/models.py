@@ -8424,6 +8424,9 @@ class SaleReceiptLink(models.Model):
     company = models.ForeignKey(Company, on_delete=models.CASCADE, related_name="+")
     token = models.CharField(max_length=64, unique=True, default=_new_receipt_token)
     created_at = models.DateTimeField(auto_now_add=True)
+    # ТЗ 30.10 №9: срок жизни и отзыв ссылки (null — бессрочная, как у ссылок Н-32)
+    expires_at = models.DateTimeField(null=True, blank=True)
+    revoked_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         verbose_name = "Публичная ссылка на чек"

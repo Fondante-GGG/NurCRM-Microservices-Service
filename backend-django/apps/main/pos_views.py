@@ -4812,7 +4812,7 @@ class SaleListOrderingFilter(filters.OrderingFilter):
 class SaleListAPIView(MarketCashierOnlyMixin, CompanyBranchRestrictedMixin, generics.ListAPIView):
     serializer_class = SaleListSerializer
     queryset = (
-        Sale.objects.select_related("user", "consultant", "client", "cashbox", "cashbox__branch", "branch")
+        Sale.objects.select_related("user", "consultant", "client", "cashbox", "cashbox__branch", "branch", "public_link")
         .prefetch_related("items__product", "payments", "deals", "deals__installments", "returns")
         .all()
     )
@@ -4983,7 +4983,7 @@ class SaleRetrieveAPIView(MarketCashierOnlyMixin, CompanyBranchRestrictedMixin, 
     lookup_url_kwarg = "pk"
 
     queryset = (
-        Sale.objects.select_related("user")
+        Sale.objects.select_related("user", "public_link")
         .prefetch_related("items__product", "returns")
         .all()
     )

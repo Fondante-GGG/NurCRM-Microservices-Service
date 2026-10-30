@@ -916,6 +916,11 @@ class SaleListSerializer(serializers.ModelSerializer):
     bonus_used = serializers.SerializerMethodField(read_only=True)
     bonus_earned = serializers.SerializerMethodField(read_only=True)
     branch_name = serializers.SerializerMethodField(read_only=True)
+    share_url = serializers.SerializerMethodField(read_only=True)  # ТЗ 30.10 №9
+
+    def get_share_url(self, obj):
+        from apps.main.receipt_share import share_url_for_sale
+        return share_url_for_sale(obj)
 
     def get_bonus_used(self, obj):
         return str(money(obj.bonus_redeemed or Decimal("0.00")))
@@ -936,6 +941,7 @@ class SaleListSerializer(serializers.ModelSerializer):
         fields = (
             "source", "device_key", "device_name", "created_by", "sold_at",  # Б-67, Б-68
             "bonus_used", "bonus_earned", "branch_name",  # Б-99
+            "share_url",  # ТЗ 30.10 №9
             "id",
             "number",
             "branch",
@@ -1233,11 +1239,17 @@ class SaleDetailSerializer(serializers.ModelSerializer):
     refunded_total = serializers.SerializerMethodField(read_only=True)  # ТЗ Н-07
     refundable_total = serializers.SerializerMethodField(read_only=True)  # ТЗ Н-07
     created_by = serializers.SerializerMethodField(read_only=True)  # Б-67
+    share_url = serializers.SerializerMethodField(read_only=True)  # ТЗ 30.10 №9
+
+    def get_share_url(self, obj):
+        from apps.main.receipt_share import share_url_for_sale
+        return share_url_for_sale(obj)
 
     class Meta:
         model = Sale
         fields = (
             "source", "device_key", "device_name", "created_by",  # Б-67
+            "share_url",  # ТЗ 30.10 №9
             "id",
             "number",
             "branch",

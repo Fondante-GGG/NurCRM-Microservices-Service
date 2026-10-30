@@ -157,6 +157,12 @@ class MainMediaDetailAPIView(APIView):
 # (2) Электронный чек
 # --------------------------------------------------------------------------
 
+def _noindex(resp):
+    """ТЗ 30.10 №9: публичные чеки не индексируются поисковиками."""
+    resp["X-Robots-Tag"] = "noindex, nofollow"
+    return resp
+
+
 def _public_url(token):
     return settings.RECEIPT_PUBLIC_URL_TEMPLATE.format(token=token)
 
@@ -219,8 +225,33 @@ def receipt_public_data(link):
     if not payments and sale.payment_method:
         payments = [{"method": sale.payment_method, "amount": _m2(sale.total)}]
     rating = SaleReceiptRating.objects.filter(link=link).first()
+    # ТЗ 30.10 №9: адрес, телефон, кассир, бонусы, статус возврата
+    company = sale.company
+    phone = (getattr(company, "phone", None) or "").strip()
+    cashier = ""
+    if sale.user_id:
+        cashier = ((sale.user.first_name or "").strip() or "")
+    client_initials = ""
+    if sale.client_id:
+        parts = (getattr(sale.client, "full_name", "") or "").split()
+        client_initials = "".join(f"{p[0].upper()}." for p in parts[:2] if p)
+    returned = sale.returns.aggregate(s=Sum("returned_amount"))["s"] or Decimal("0")
+    if sale.status == Sale.Status.CANCELED or (returned > 0 and Decimal(str(sale.total or 0)) <= 0):
+        receipt_status = "returned"
+    elif returned > 0 or sale.status == Sale.Status.PARTIALLY_RETURNED:
+        receipt_status = "partially_returned"
+    elif sale.status == Sale.Status.DEBT:
+        receipt_status = "debt"
+    else:
+        receipt_status = "paid"
+    bonus_earned = sale.bonus_transactions.filter(reason="earn").aggregate(s=Sum("delta"))["s"] or Decimal("0")
     return {
-        "company": {"name": (vh.get("brand") or sale.company.name or "").strip()},
+        "company": {
+            "name": (vh.get("brand") or company.name or "").strip(),
+            "address": (vh.get("address") or "").strip(),
+            "phone": phone,
+            "inn": (vh.get("inn") or "").strip(),
+        },
         "number": str(ensure_sale_doc_number(sale)),
         "date": dt.isoformat(),
         "items": items,
@@ -229,16 +260,27 @@ def receipt_public_data(link):
             "discount_total": _m2(sale.discount_total),
             "tax_total": _m2(sale.tax_total),
             "total": _m2(sale.total),
+            "returned_total": _m2(returned),
         },
+        "bonus": {"earned": _m2(bonus_earned), "redeemed": _m2(sale.bonus_redeemed)},
         "payments": payments,
+        "cashier": cashier,
+        "client": client_initials,
+        "status": receipt_status,
         "rating": ({"score": rating.score, "comment": rating.comment} if rating else None),
     }
 
 
 def _link_or_none(token):
+    """Живая ссылка по токену; отозванная (ТЗ 30.10 №9) или просроченная — как неизвестная."""
     if not re.fullmatch(r"[A-Za-z0-9_-]{16,64}", token or ""):
         return None
-    return SaleReceiptLink.objects.select_related("sale", "sale__company").filter(token=token).first()
+    link = SaleReceiptLink.objects.select_related("sale", "sale__company").filter(token=token).first()
+    if link is None or link.revoked_at is not None:
+        return None
+    if link.expires_at is not None and link.expires_at <= timezone.now():
+        return None
+    return link
 
 
 class PublicReceiptAPIView(APIView):
@@ -251,8 +293,8 @@ class PublicReceiptAPIView(APIView):
     def get(self, request, token):
         link = _link_or_none(token)
         if link is None:
-            return _err("not_found", "Чек не найден.", 404)
-        return Response(receipt_public_data(link))
+            return _noindex(_err("not_found", "Чек не найден.", 404))
+        return _noindex(Response(receipt_public_data(link)))
 
 
 def build_receipt_pdf(data) -> bytes:
@@ -310,7 +352,7 @@ class PublicReceiptPdfAPIView(APIView):
             return _err("not_found", "Чек не найден.", 404)
         resp = HttpResponse(build_receipt_pdf(receipt_public_data(link)), content_type="application/pdf")
         resp["Content-Disposition"] = 'inline; filename="receipt.pdf"'
-        return resp
+        return _noindex(resp)
 
 
 class PublicReceiptRatingAPIView(APIView):
