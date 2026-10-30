@@ -11,7 +11,7 @@ from .tz1029_views import AppTestChecksView, GlobalProductExportView
 from .price_check import ProductCatalogVersionView, ProductPriceCheckView
 from .change_views import ChangesFeedView, EventsStreamView  # ТЗ Н-31
 from core.capabilities import CapabilitiesAPIView, ClientVersionsReportAPIView  # единое ТЗ Б-01
-from apps.main.purchases import PurchaseActivateAPIView, PurchasesListAPIView
+from apps.main.purchases import PurchaseActivateAPIView, PurchaseKeysAPIView, PurchasesListAPIView
 from .variant_stock_diff import VariantStockDiffAPIView  # Б-02
 from .pos_requests import (PosRequestAcceptView, PosRequestCancelView, PosRequestDeclineView,
                            PosRequestListCreateView)
@@ -200,6 +200,7 @@ urlpatterns = [
     path('capabilities/', CapabilitiesAPIView.as_view(), name='api-capabilities'),  # Б-01
     path('purchases/', PurchasesListAPIView.as_view(), name='purchases'),  # ТЗ 29.10 Б-96
     path('purchases/activate/', PurchaseActivateAPIView.as_view(), name='purchases-activate'),
+    path('purchases/keys/', PurchaseKeysAPIView.as_view(), name='purchases-keys'),  # 30.10: Ed25519
     path('client-versions/', ClientVersionsReportAPIView.as_view(), name='api-client-versions'),  # Б-01
     path('products/variant-stock-diff/', VariantStockDiffAPIView.as_view(), name='variant-stock-diff'),  # Б-02
     path('products/catalog-version/', ProductCatalogVersionView.as_view(), name='product-catalog-version'),
