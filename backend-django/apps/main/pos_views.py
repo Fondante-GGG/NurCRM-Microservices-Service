@@ -4097,6 +4097,29 @@ def _refund_exceeds_paid_error(request, sale):
     )
 
 
+def _return_strict(request, company) -> bool:
+    from core.api_compat import is_strict
+
+    return is_strict(request, company)
+
+
+def _line_refund_exceeds_error(line_id, requested_qty, line):
+    """ТЗ 30.10 №10: возврат по строке больше остатка — код и предел строки."""
+    from core.exceptions import ApiError
+
+    return ApiError(
+        "refund_exceeds_paid",
+        "Возврат больше положенного по строке чека.",
+        status_code=409,
+        data={
+            "line_id": str(line_id),
+            "requested_quantity": str(qty3(requested_qty)),
+            "max_quantity": str(qty3(line.get("quantity") or 0)),
+            "max_amount": str(money(line.get("amount") or 0)),
+        },
+    )
+
+
 def _refund_summary(sale, debt_adj) -> Optional[Dict]:
     """ТЗ Н-02: разбивка последнего возврата — {id, amount, cash, noncash, debt_reduced, method}."""
     from apps.main.models import SaleReturn
@@ -4111,6 +4134,11 @@ def _refund_summary(sale, debt_adj) -> Optional[Dict]:
         "noncash": str(money(ret.refund_noncash or 0)),
         "debt_reduced": str(money(Decimal(str((debt_adj or {}).get("reduced_by") or 0)))),
         "method": ret.refund_method,
+        # ТЗ 30.10 №10: сколько сервер вернул по каждой строке (касса берёт отсюда, а не считает сама)
+        "lines": [
+            {"sale_item_id": r.get("sale_item"), "quantity": r.get("qty"), "amount": r.get("amount")}
+            for r in (ret.returned_items or []) if isinstance(r, dict)
+        ],
     }
 
 
@@ -4121,6 +4149,7 @@ def _execute_sale_return(
     is_defect: bool = False,
     user=None,
     payload: Optional[Dict] = None,
+    strict_errors: bool = False,
 ) -> Optional[Dict]:
     """
     Выполняет возврат продажи (полный или частичный).
@@ -4174,12 +4203,11 @@ def _execute_sale_return(
         total_returned_money = Decimal("0.00")
         # ТЗ Н-02: доля скидки на чек. Строка возвращается по цене после скидки
         # на позицию × (итог чека / сумма строк); последний возврат — ровно остаток.
+        from apps.main.refund_calc import check_ratio as _check_ratio, line_refund, sale_refundable_lines
+
         old_total = money(sale.total or Decimal("0.00"))
-        lines_net = money(sum(
-            (Decimal(str(it.unit_price or 0)) * Decimal(str(it.quantity or 0)) - Decimal(str(it.line_discount or 0)))
-            for it in sale.items.all()
-        ))
-        check_ratio = (old_total / lines_net) if lines_net > 0 else Decimal("1")
+        refundable = sale_refundable_lines(sale)  # ТЗ 30.10 №10: для ошибки «больше положенного»
+        check_ratio = _check_ratio(sale)
 
         for sid, rq in partial_items:
             item = (
@@ -4189,14 +4217,15 @@ def _execute_sale_return(
             )
             old_q = qty3(Decimal(str(item.quantity or 0)))
             rq = qty3(rq)
+            if rq > old_q and strict_errors:
+                # ТЗ 30.10 №10: новая касса получает код и предел по строке
+                line = refundable.get(str(sid)) or {}
+                raise _line_refund_exceeds_error(sid, rq, line)
             if rq > old_q or rq <= 0:
                 raise ValidationError({"items": f"Некорректное количество возврата для позиции {sid}."})
 
-            unit_price = item.unit_price or Decimal("0.00")
             old_disc = Decimal(str(item.line_discount or 0))
-            item_disc = money(old_disc * (rq / old_q)) if old_q > 0 else Decimal("0.00")
-            item_net = money((unit_price * rq) - item_disc)
-            item_returned_money = money(item_net * check_ratio)
+            item_returned_money, item_disc, item_net = line_refund(item, rq, check_ratio)
             total_returned_money += item_returned_money
             # В строке возврата — цена со скидкой (и на позицию, и на чек), чтобы сверка сходилась.
             returned_lines.append(_return_line(
@@ -4485,7 +4514,8 @@ class SaleReturnAPIView(MarketCashierOnlyMixin, CompanyBranchRestrictedMixin, AP
             partial = _parse_partial_return_items(request.data)
             is_defect = _parse_is_defect(request.data)
             debt_adj = _execute_sale_return(
-                sale, partial, is_defect=is_defect, user=request.user, payload=request.data
+                sale, partial, is_defect=is_defect, user=request.user, payload=request.data,
+                strict_errors=_return_strict(request, sale.company),  # ТЗ 30.10 №10
             )
         except (ValidationError, DjangoValidationError) as e:
             detail = getattr(e, "detail", None) or getattr(e, "message_dict", None) or getattr(e, "messages", None) or str(e)
@@ -4567,7 +4597,8 @@ class AgentSaleReturnAPIView(SaleReturnAPIView):
             partial = _parse_partial_return_items(request.data)
             is_defect = _parse_is_defect(request.data)
             debt_adj = _execute_sale_return(
-                sale, partial, is_defect=is_defect, user=request.user, payload=request.data
+                sale, partial, is_defect=is_defect, user=request.user, payload=request.data,
+                strict_errors=_return_strict(request, sale.company),  # ТЗ 30.10 №10
             )
         except (ValidationError, DjangoValidationError) as e:
             detail = getattr(e, "detail", None) or getattr(e, "message_dict", None) or getattr(e, "messages", None) or str(e)

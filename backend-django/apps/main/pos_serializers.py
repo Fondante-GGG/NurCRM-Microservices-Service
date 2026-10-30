@@ -1100,6 +1100,10 @@ class SaleItemReadSerializer(serializers.ModelSerializer):
     price_override_reason = serializers.SerializerMethodField()
     returnable_qty = serializers.SerializerMethodField()
     quantity_refunded = serializers.SerializerMethodField()  # ТЗ Н-07
+    # ТЗ 30.10 №10: остаток к возврату по строке по правилу сервера
+    refundable_quantity = serializers.SerializerMethodField()
+    refundable_amount = serializers.SerializerMethodField()
+    unit_refund_price = serializers.SerializerMethodField()
     sale_unit = serializers.SerializerMethodField()  # ТЗ 26.10 Б-53
     base_quantity = serializers.SerializerMethodField()
 
@@ -1143,10 +1147,27 @@ class SaleItemReadSerializer(serializers.ModelSerializer):
             "price_override_reason",
             "returnable_qty",
             "quantity_refunded",
+            "refundable_quantity",
+            "refundable_amount",
+            "unit_refund_price",
             "sale_unit",
             "base_quantity",
         )
         read_only_fields = fields
+
+    def _refundable(self, obj):
+        from apps.main.refund_calc import sale_refundable_lines
+
+        return sale_refundable_lines(obj.sale).get(str(obj.id)) or {}
+
+    def get_refundable_quantity(self, obj):
+        return str(qty3(self._refundable(obj).get("quantity") or 0))
+
+    def get_refundable_amount(self, obj):
+        return str(money(self._refundable(obj).get("amount") or 0))
+
+    def get_unit_refund_price(self, obj):
+        return str(money(self._refundable(obj).get("unit_price") or 0))
 
     def get_sale_unit(self, obj):
         from apps.main.tz26.hw_units.units import get_sale_unit_for_line
