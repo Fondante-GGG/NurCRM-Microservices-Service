@@ -6086,6 +6086,21 @@ def _receipt_discount_extras(data, items, by_id):
     }
 
 
+def _receipt_document_fields(data):
+    """ТЗ 30.10: номер и дата накладной поставщика из тела прихода (необязательные)."""
+    out = {}
+    num = data.get("document_number") if hasattr(data, "get") else None
+    if num not in (None, ""):
+        out["document_number"] = str(num).strip()[:64]
+    raw = data.get("document_date") if hasattr(data, "get") else None
+    if raw:
+        d = parse_date(str(raw)[:10])
+        if d is None:
+            raise ValidationError({"document_date": "Дата накладной: YYYY-MM-DD."})
+        out["document_date"] = d
+    return out
+
+
 @read_only_guard("can_edit_procurement")
 class SupplierReceiptAPIView(CompanyBranchRestrictedMixin, APIView):
     """
@@ -6165,6 +6180,7 @@ class SupplierReceiptAPIView(CompanyBranchRestrictedMixin, APIView):
 
     @transaction.atomic
     def _post_impl(self, request, supplier_id):
+        doc_fields = _receipt_document_fields(request.data)  # ТЗ 30.10: проверяем до любых записей
         opt_in = _truthy(request.data.get("create_deal"))
         company = self._company()
         branch = self._auto_branch()
@@ -6250,6 +6266,7 @@ class SupplierReceiptAPIView(CompanyBranchRestrictedMixin, APIView):
             created_by=getattr(request, "user", None),
             order=po_order,
             **(adj["receipt_fields"] if adj else {}),
+            **doc_fields,  # ТЗ 30.10 «Поступления»
         )
         payment_type = _parse_payment_type(request.data.get("payment_type"))
 
@@ -6413,6 +6430,9 @@ class SupplierReceiptAPIView(CompanyBranchRestrictedMixin, APIView):
         resp_data = {
             "id": str(receipt.id),
             "receipt_id": str(receipt.id),
+            "number": receipt.number,
+            "document_number": receipt.document_number,
+            "document_date": receipt.document_date.isoformat() if receipt.document_date else None,
             "order_id": str(po_order.id) if po_order else None,
             "order_status": po_order.status if po_order else None,
             "supplier": str(supplier.id),
@@ -6459,6 +6479,23 @@ class SupplierReceiptAPIView(CompanyBranchRestrictedMixin, APIView):
         return Response(resp_data, status=status.HTTP_200_OK)
 
 
+# ТЗ 30.10 «Поступления»: строки с партией и файлы накладной — без запросов на каждую строку
+_RECEIPT_PREFETCH = ("items", "items__product", "items__tz26_batch_line__batch", "attachments")
+
+
+def _receipt_items_only_product(qs, product_id):
+    """ТЗ 30.10 п.1: приходы, где есть товар, и в items — только его строки."""
+    from django.db.models import Prefetch
+
+    has = SupplierReceiptItem.objects.filter(receipt_id=OuterRef("pk"), product_id=product_id)
+    lines = SupplierReceiptItem.objects.filter(product_id=product_id).select_related("product")
+    return (
+        qs.filter(Exists(has))
+        .prefetch_related(None)
+        .prefetch_related(Prefetch("items", queryset=lines), "items__tz26_batch_line__batch", "attachments")
+    )
+
+
 class SupplierReceiptQuerysetMixin:
     def _supplier_receipts_base_queryset(self):
         line_total = ExpressionWrapper(
@@ -6471,7 +6508,7 @@ class SupplierReceiptQuerysetMixin:
         )
         qs = (
             SupplierReceipt.objects.select_related("supplier", "company", "branch", "created_by")
-            .prefetch_related("items", "items__product")
+            .prefetch_related(*_RECEIPT_PREFETCH)
             .annotate(total_amount=Sum(line_total))
             # Meta.ordering is dropped by Django in GROUP BY queries (annotate+Sum),
             # so order explicitly: newest receipts first.
@@ -6549,7 +6586,15 @@ class SupplierReceiptListAPIView(
     pagination_class = SupplierReceiptLimitPagination
 
     def get_queryset(self):
-        return self._supplier_receipts_filtered_queryset()
+        qs = self._supplier_receipts_filtered_queryset()
+        product_id = (self.request.query_params.get("product_id") or self.request.query_params.get("product") or "").strip()
+        if product_id:
+            try:
+                product_id = UUID(product_id)
+            except ValueError:
+                return qs.none()
+            qs = _receipt_items_only_product(qs, product_id)
+        return qs
 
     def list(self, request, *args, **kwargs):
         queryset = self.filter_queryset(self.get_queryset())

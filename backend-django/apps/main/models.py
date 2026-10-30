@@ -3805,6 +3805,11 @@ class SupplierReceipt(models.Model):
     discount = models.DecimalField(max_digits=14, decimal_places=2, default=Decimal("0.00"), db_default=Decimal("0.00"))
     discount_percent = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
     extra_costs = models.JSONField(default=list, blank=True, db_default=[])
+    # ТЗ 30.10 «Поступления»: номер прихода в компании, накладная поставщика, файлы накладной
+    number = models.PositiveIntegerField(null=True, blank=True, db_index=True)
+    document_number = models.CharField(max_length=64, blank=True, default="", db_default="")
+    document_date = models.DateField(null=True, blank=True)
+    attachments = models.ManyToManyField("main.MainMedia", blank=True, related_name="supplier_receipts")
 
     class Meta:
         verbose_name = "Оприходование от поставщика"
@@ -3820,6 +3825,19 @@ class SupplierReceipt(models.Model):
             raise ValidationError({"supplier": "Поставщик другой компании."})
         if self.branch_id and self.company_id and self.branch.company_id != self.company_id:
             raise ValidationError({"branch": "Филиал принадлежит другой компании."})
+
+    def save(self, *args, **kwargs):
+        if self.number is None and self.company_id:
+            # ТЗ 30.10: следующий номер прихода в компании. Отдельная advisory-блокировка
+            # на компанию (не строка Company — та горячая), снимается в конце транзакции.
+            with transaction.atomic():
+                if connection.vendor == "postgresql":
+                    with connection.cursor() as cur:
+                        cur.execute("SELECT pg_advisory_xact_lock(hashtext(%s))", [f"supplier_receipt_no:{self.company_id}"])
+                last = SupplierReceipt.objects.filter(company_id=self.company_id).aggregate(m=Max("number"))["m"]
+                self.number = (last or 0) + 1
+                return super().save(*args, **kwargs)
+        return super().save(*args, **kwargs)
 
 
 class PurchaseOrder(models.Model):

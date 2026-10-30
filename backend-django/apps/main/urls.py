@@ -48,6 +48,7 @@ from apps.main.showcase.size_charts import SizeChartListCreateAPIView, SizeChart
 from apps.main.supplier_receipt_pdf import SupplierReceiptPdfAPIView
 from apps.main.media_receipts import MainMediaListCreateAPIView, MainMediaDetailAPIView, SalePublicLinkAPIView
 from apps.main.receipt_share import SaleShareLinkAPIView
+from apps.main.receipt_files import SupplierReceiptFileAPIView
 from apps.main.showcase.views_public import PublicCompanyShowcaseFacetsAPIView, PublicCompanyProductDetailAPIView, PublicCompanyAPIView, PublicCompanyShowcaseAPIView
 from apps.main.recommendations import (
     RecommendationEventsAPIView,
@@ -504,6 +505,8 @@ urlpatterns = [
     path("suppliers/", SupplierListAPIView.as_view(), name="supplier-list"),
     path("suppliers/receipts/", SupplierReceiptListAPIView.as_view(), name="supplier-receipts"),
     path("suppliers/receipts/<uuid:pk>/pdf/", SupplierReceiptPdfAPIView.as_view(), name="supplier-receipt-pdf"),  # ТЗ Н-33
+    path("suppliers/receipts/<uuid:pk>/file/", SupplierReceiptFileAPIView.as_view(), name="supplier-receipt-file"),  # ТЗ 30.10
+    path("suppliers/receipts/<uuid:pk>/file/<uuid:media_id>/", SupplierReceiptFileAPIView.as_view(), name="supplier-receipt-file-delete"),
     path("suppliers/receipts/<uuid:pk>/", SupplierReceiptRetrieveAPIView.as_view(), name="supplier-receipt-detail"),
     path("suppliers/returns/", SupplierReturnListAPIView.as_view(), name="supplier-returns-list"),
     path("suppliers/returns/<uuid:pk>/", SupplierReturnRetrieveAPIView.as_view(), name="supplier-returns-detail"),

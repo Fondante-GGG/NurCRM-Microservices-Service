@@ -3537,13 +3537,34 @@ class SupplierReceiptItemReadSerializer(serializers.ModelSerializer):
     unit = serializers.CharField(source="product.unit", read_only=True, default="шт")
     returned_qty = serializers.SerializerMethodField()
     returnable_qty = serializers.SerializerMethodField()
+    # ТЗ 30.10 «Поступления»: партия строки (Б-61) и её текущий остаток
+    batch_id = serializers.SerializerMethodField()
+    batch_number = serializers.SerializerMethodField()
+    batch_remaining = serializers.SerializerMethodField()
 
     class Meta:
         model = SupplierReceiptItem
         fields = [
             "id", "product", "product_id", "product_name", "product_code",
             "qty", "purchase_price", "returned_qty", "returnable_qty", "unit",
+            "batch_id", "batch_number", "batch_remaining",
         ]
+
+    def _batch(self, obj):
+        line = getattr(obj, "tz26_batch_line", None) if hasattr(obj, "tz26_batch_line") else None
+        return line.batch if line is not None else None
+
+    def get_batch_id(self, obj):
+        b = self._batch(obj)
+        return str(b.id) if b else None
+
+    def get_batch_number(self, obj):
+        b = self._batch(obj)
+        return b.label if b else None
+
+    def get_batch_remaining(self, obj):
+        b = self._batch(obj)
+        return str(Decimal(str(b.remaining)).quantize(Decimal("0.001"), rounding=ROUND_HALF_UP)) if b else None
 
     def get_returned_qty(self, obj):
         from apps.main.models import SupplierReturnItem
@@ -3584,11 +3605,21 @@ class SupplierReceiptReadSerializer(serializers.ModelSerializer):
     cashbox_name = serializers.SerializerMethodField()
     shift = serializers.SerializerMethodField()
     order_id = serializers.UUIDField(read_only=True, allow_null=True)  # ТЗ Н-29
+    # ТЗ 30.10 «Поступления»: файлы накладной и кто принял (id)
+    attachments = serializers.SerializerMethodField()
+    file = serializers.SerializerMethodField()
+    created_by = serializers.UUIDField(source="created_by_id", read_only=True, allow_null=True)
 
     class Meta:
         model = SupplierReceipt
         fields = [
             "id",
+            "number",
+            "document_number",
+            "document_date",
+            "attachments",
+            "file",
+            "created_by",
             "order_id",
             "company",
             "branch",
@@ -3616,6 +3647,16 @@ class SupplierReceiptReadSerializer(serializers.ModelSerializer):
             "extra_costs",
             "items",
         ]
+
+    def get_attachments(self, obj):
+        from apps.main.media_receipts import media_payload
+
+        request = self.context.get("request")
+        return [media_payload(m, request) for m in obj.attachments.all()]
+
+    def get_file(self, obj):
+        files = self.get_attachments(obj)
+        return files[0]["url"] if files else None
 
     def _pay_info(self, obj):
         from apps.main.views import _receipt_payment_info

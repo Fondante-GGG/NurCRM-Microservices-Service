@@ -52,7 +52,41 @@ def sniff_content_type(head: bytes):
         return "image/webp"
     if head.startswith(b"%PDF-"):
         return "application/pdf"
+    if head.startswith(b"PK\x03\x04"):  # ТЗ 30.10: накладная Excel (xlsx — zip-архив)
+        return XLSX
+    if head.startswith(b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"):  # старый .xls
+        return XLS
     return None
+
+
+XLSX = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+XLS = "application/vnd.ms-excel"
+MEDIA_EXT = {"image/png": "png", "image/jpeg": "jpg", "image/webp": "webp", "application/pdf": "pdf",
+             XLSX: "xlsx", XLS: "xls"}
+
+
+def store_company_media(company, upload, purpose, user, allowed):
+    """Проверить и сохранить файл компании. Возвращает (MainMedia, None) или (None, Response-ошибка)."""
+    if upload.size > MAX_FILE_BYTES:
+        return None, _err("too_large", "Файл больше 5 МБ.", 413)
+    upload.seek(0)
+    head = upload.read(16)
+    upload.seek(0)
+    ctype = sniff_content_type(head)
+    if ctype not in allowed:
+        return None, _err("invalid_type", "Недопустимый тип файла.")
+    used = MainMedia.objects.filter(company=company).aggregate(s=Sum("size"))["s"] or 0
+    if used + upload.size > int(settings.COMPANY_MEDIA_QUOTA_MB) * 1024 * 1024:
+        return None, _err("quota_exceeded", "Исчерпана квота хранилища компании.", 413)
+    sha = hashlib.sha256()
+    for chunk in upload.chunks():
+        sha.update(chunk)
+    upload.seek(0)
+    media = MainMedia(company=company, purpose=purpose, size=upload.size, content_type=ctype,
+                      sha256=sha.hexdigest(), created_by=user)
+    media.file.save(f"{media.id.hex}.{MEDIA_EXT[ctype]}", upload, save=False)
+    media.save()
+    return media, None
 
 
 def media_payload(media, request=None):
@@ -102,29 +136,14 @@ class MainMediaListCreateAPIView(APIView):
         purpose = str(request.data.get("purpose") or MainMedia.Purpose.OTHER).strip()
         if purpose not in MainMedia.Purpose.values:
             return _err("invalid_purpose", f"purpose: {', '.join(MainMedia.Purpose.values)}.")
-        if upload.size > MAX_FILE_BYTES:
-            return _err("too_large", "Файл больше 5 МБ.", 413)
-        upload.seek(0)
-        head = upload.read(16)
-        upload.seek(0)
-        ctype = sniff_content_type(head)
         allowed = {"image/png", "image/jpeg", "image/webp"}
         if purpose == MainMedia.Purpose.INVOICE:
             allowed.add("application/pdf")
-        if ctype not in allowed:
-            return _err("invalid_type", "Допустимы PNG, JPG, WebP (для накладной ещё PDF).")
-        used = MainMedia.objects.filter(company=company).aggregate(s=Sum("size"))["s"] or 0
-        if used + upload.size > int(settings.COMPANY_MEDIA_QUOTA_MB) * 1024 * 1024:
-            return _err("quota_exceeded", "Исчерпана квота хранилища компании.", 413)
-        sha = hashlib.sha256()
-        for chunk in upload.chunks():
-            sha.update(chunk)
-        upload.seek(0)
-        ext = {"image/png": "png", "image/jpeg": "jpg", "image/webp": "webp", "application/pdf": "pdf"}[ctype]
-        media = MainMedia(company=company, purpose=purpose, size=upload.size, content_type=ctype,
-                          sha256=sha.hexdigest(), created_by=request.user)
-        media.file.save(f"{media.id.hex}.{ext}", upload, save=False)
-        media.save()
+        media, error = store_company_media(company, upload, purpose, request.user, allowed)
+        if error is not None:
+            if error.data.get("code") == "invalid_type":
+                error.data["detail"] = "Допустимы PNG, JPG, WebP (для накладной ещё PDF)."
+            return error
         return Response(media_payload(media, request), status=status.HTTP_201_CREATED)
 
 
