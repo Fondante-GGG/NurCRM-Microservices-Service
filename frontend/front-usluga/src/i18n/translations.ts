@@ -22,6 +22,8 @@ export const ru = {
   },
   sections: {
     usluga: "Услуги",
+    banya: "Баня и сауна",
+    arenda: "Аренда помещений",
     sklad: "Склад",
     market: "Маркет",
     proizvodstvo: "Производство",
@@ -29,6 +31,8 @@ export const ru = {
   },
   sectionHints: {
     usluga: "Записи, мастера, клиенты",
+    banya: "Шкафчики, браслеты, бар, открытый счёт",
+    arenda: "Шахматка, арендаторы, договоры, начисления",
     sklad: "Остатки, приёмка, ревизия",
     market: "Товары, продажи, витрина",
     proizvodstvo: "Заказы, сырьё, выпуск",
@@ -69,6 +73,18 @@ export const ru = {
     filialy: "Филиалы",
     "dop-uslugi": "Доп. услуги",
     nastrojki: "Настройки",
+    vnutri: "Сейчас внутри",
+    vhod: "Вход · браслет",
+    bar: "Бар",
+    "uslugi-masterov": "Услуги в счёт",
+    komnaty: "Платные комнаты",
+    vyhod: "Выход и оплата",
+    katalog: "Каталог",
+    shahmatka: "Шахматка",
+    arendatory: "Арендаторы",
+    dogovory: "Договоры",
+    sverka: "Акт сверки",
+    rashody: "Расходы и налоги",
   } as Record<string, string>,
 };
 
@@ -94,6 +110,8 @@ export const ky: typeof ru = {
   },
   sections: {
     usluga: "Кызматтар",
+    banya: "Мончо жана сауна",
+    arenda: "Ижарага берүү",
     sklad: "Кампа",
     market: "Маркет",
     proizvodstvo: "Өндүрүш",
@@ -101,6 +119,8 @@ export const ky: typeof ru = {
   },
   sectionHints: {
     usluga: "Жазылуулар, усталар, кардарлар",
+    banya: "Шкафтар, билериктер, бар, ачык эсеп",
+    arenda: "Шахматка, ижарачылар, келишимдер",
     sklad: "Калдыктар, кабыл алуу, ревизия",
     market: "Товарлар, сатуулар, витрина",
     proizvodstvo: "Заказдар, чийки зат, чыгаруу",
@@ -141,6 +161,18 @@ export const ky: typeof ru = {
     filialy: "Филиалдар",
     "dop-uslugi": "Кошумча кызматтар",
     nastrojki: "Жөндөөлөр",
+    vnutri: "Азыр ичинде",
+    vhod: "Кирүү · билерик",
+    bar: "Бар",
+    "uslugi-masterov": "Эсепке кызматтар",
+    komnaty: "Акылуу бөлмөлөр",
+    vyhod: "Чыгуу жана төлөм",
+    katalog: "Каталог",
+    shahmatka: "Шахматка",
+    arendatory: "Ижарачылар",
+    dogovory: "Келишимдер",
+    sverka: "Салыштыруу актысы",
+    rashody: "Чыгымдар жана салыктар",
   },
 };
 
