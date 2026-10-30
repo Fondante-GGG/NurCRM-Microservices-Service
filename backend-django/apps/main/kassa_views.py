@@ -252,6 +252,8 @@ class QuickCheckoutSerializer(serializers.Serializer):
     # BE2-10: продажа, сделанная без связи и досланная позже.
     offline = serializers.BooleanField(required=False, default=False)
     offline_created_at = serializers.DateTimeField(required=False, allow_null=True)
+    # ТЗ 30.10 №11: чек из очереди уже состоялся — принять даже при нулевом остатке
+    allow_negative_stock = serializers.BooleanField(required=False, default=False)
     # ТЗ ч.12, 2.4: время продажи на кассе. Если смена к моменту отправки закрыта или неизвестна
     # серверу — продажа идёт в смену этой кассы, открытую в это время, иначе в техническую смену дня.
     sold_at = serializers.DateTimeField(required=False, allow_null=True)
@@ -484,6 +486,28 @@ def _backdate_offline_sale(sale, at):
 from apps.users.permissions_flags import PosAccess  # noqa: E402  ТЗ Н-16
 
 
+def _stock_negative(sale):
+    """[{product_id, variant_id, balance}] — товары чека с отрицательным остатком после продажи."""
+    out, seen = [], set()
+    for it in sale.items.select_related("product", "variant"):
+        p = it.product
+        if p is None or p.kind == Product.Kind.SERVICE:
+            continue
+        v = getattr(it, "variant", None)
+        key = (p.id, v.id if v else None)
+        if key in seen:
+            continue
+        seen.add(key)
+        p.refresh_from_db(fields=["quantity"])
+        bal = Decimal(str(p.quantity or 0))
+        if v is not None:
+            v.refresh_from_db(fields=["quantity"])
+            bal = min(bal, Decimal(str(v.quantity or 0)))
+        if bal < 0:
+            out.append({"product_id": str(p.id), "variant_id": str(v.id) if v else None, "balance": str(qty3(bal))})
+    return out
+
+
 class PosQuickCheckoutAPIView(APIView):
     """
     POST /api/main/pos/checkout/
@@ -530,6 +554,8 @@ class PosQuickCheckoutAPIView(APIView):
         user = request.user
         # ТЗ Н-15: офлайн-досылка (offline + sold_at): цены кассы, остаток в минус, вариант не обязателен
         self._offline = bool(data.get("offline") and data.get("offline_created_at"))
+        # ТЗ 30.10 №11: явный флаг кассы для чека из очереди (продажа уже состоялась) — остаток уходит в минус
+        self._force_minus = self._offline or bool(data.get("allow_negative_stock"))
         self._warnings = []
         self._variant_missing = set()
         self._index_by_identity = {id(it): i for i, it in enumerate(data["items"])}
@@ -601,7 +627,7 @@ class PosQuickCheckoutAPIView(APIView):
 
                 resp = SaleCheckoutAPIView().checkout(
                     request, cart.id, self._checkout_data(data, cart),
-                    force_negative_stock=self._offline, lenient_variants=self._offline,
+                    force_negative_stock=self._force_minus, lenient_variants=self._offline,
                 )
                 if resp.status_code >= 400:
                     transaction.set_rollback(True)
@@ -660,6 +686,9 @@ class PosQuickCheckoutAPIView(APIView):
         for k in ("cashflows", "receipt_print_path", "ekassa", "payments"):
             if k in resp.data:
                 body[k] = resp.data[k]
+        if self._force_minus:
+            # ТЗ 30.10 №11: какие товары ушли в минус — решение «принять в минус» за владельцем
+            body["stock_negative"] = _stock_negative(sale)
         if self._offline:
             # ТЗ Н-15: что допущено при досылке — остаток в минус, вариант не выбран
             for it in body["items"]:
