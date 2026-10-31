@@ -75,7 +75,7 @@ class ProductInventorySessionListCreateAPIView(CompanyBranchRestrictedMixin, gen
 
         for row in rows:
             pid = row["product_id"]
-            qf = Decimal(str(row["quantity_fact"])).quantize(Decimal("0.01"))
+            qf = Decimal(str(row["quantity_fact"])).quantize(Decimal("0.001"))  # ТЗ 31.10 п.19
             ProductInventoryItem.objects.create(session=session, product_id=pid, quantity_fact=qf)
 
         session.refresh_from_db()
@@ -121,13 +121,13 @@ class ProductInventorySessionApplyAPIView(CompanyBranchRestrictedMixin, APIView)
                     {"detail": f"Товар {line.product_id} недоступен для проведения в этой компании/филиале."},
                     status=status.HTTP_400_BAD_REQUEST,
                 )
-            qf = Decimal(str(line.quantity_fact or 0)).quantize(Decimal("0.01"))
+            qf = Decimal(str(line.quantity_fact or 0)).quantize(Decimal("0.001"))
             if not allow_negative and qf < 0:
                 return Response(
                     {"detail": f"Отрицательный остаток для «{p.name}» запрещён. Передайте allow_negative=true или исправьте quantity_fact."},
                     status=status.HTTP_400_BAD_REQUEST,
                 )
-            qb = Decimal(str(p.quantity or 0)).quantize(Decimal("0.01"))
+            qb = Decimal(str(p.quantity or 0)).quantize(Decimal("0.001"))
             line.quantity_before = qb
             line.save(update_fields=["quantity_before"])
             p.quantity = qf

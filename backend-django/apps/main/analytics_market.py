@@ -2017,8 +2017,12 @@ class AnalyticsView(APIView):
                     rc_qs = rc_qs.filter(receipt__branch=branch)
 
             if rc_qs.exists():
-                val_expr = ExpressionWrapper(
-                    F("qty") * Coalesce(F("purchase_price"), Value(Decimal("0.00"), output_field=MONEY_FIELD)),
+                val_expr = Coalesce(  # ТЗ 31.10 п.19: сумма по накладной, если передана
+                    F("line_total"),
+                    ExpressionWrapper(
+                        F("qty") * Coalesce(F("purchase_price"), Value(Decimal("0.00"), output_field=MONEY_FIELD)),
+                        output_field=MONEY_FIELD,
+                    ),
                     output_field=MONEY_FIELD,
                 )
                 agg = rc_qs.aggregate(

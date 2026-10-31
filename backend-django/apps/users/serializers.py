@@ -444,6 +444,7 @@ class UserSerializer(serializers.ModelSerializer):
             # Склад: опасные операции (null — по умолчанию для роли)
             "can_post_negative_stock", "can_unpost_documents", "can_change_document_date",
             "can_post_closed_period", "can_cash_negative",
+            "can_edit_purchase_documents",  # ТЗ 31.10 п.21
             *READ_ONLY_FIELDS,
 
             # Consulting: воронка продаж

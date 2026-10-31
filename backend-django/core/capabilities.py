@@ -29,6 +29,7 @@ FEATURES = (
     # ТЗ 31.10 п.16: только то, что уже работает на сервере (receipt_patch, transfer_documents,
     # stock_balance, agents — добавятся вместе с функциями)
     "share_link", "receipt_attachments", "purchase_signature", "server_addons", "product_archive", "bulk_pay_debt",
+    "receipt_patch",  # ТЗ 31.10 п.21: PATCH suppliers/receipts/{id}/ (dry_run, If-Match, коды ошибок)
 )
 
 

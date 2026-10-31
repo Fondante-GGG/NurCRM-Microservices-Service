@@ -57,7 +57,8 @@ def convert_order_lines(lines):
         ln = dict(ln)
         ln["qty"] = (Decimal(str(ln["qty"])) * factor).quantize(Q3, rounding=ROUND_HALF_UP)
         if ln.get("purchase_price") is not None:
-            ln["purchase_price"] = (Decimal(str(ln["purchase_price"])) / factor).quantize(Q3, rounding=ROUND_HALF_UP)
+            # ТЗ 31.10 п.19: закупка за базовую единицу — 4 знака
+            ln["purchase_price"] = (Decimal(str(ln["purchase_price"])) / factor).quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)
         out.append(ln)
     return out
 
