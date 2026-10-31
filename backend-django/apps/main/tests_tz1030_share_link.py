@@ -158,7 +158,8 @@ class ShareLinkTests(TestCase):
         self.sale.status = Sale.Status.PARTIALLY_RETURNED
         self.sale.save(update_fields=["total", "status"])
         d = self.pub.get(f"/api/public/receipts/{tok}/").json()
-        self.assertEqual([i["returned"] for i in d["items"]], [False, True])
+        # ТЗ 31.10 п.3: одна исходная строка (2 шт.), возвращено 1 — без задвоения строк
+        self.assertEqual([(i["returned"], i["qty"], i["returned_qty"]) for i in d["items"]], [(False, "2", "1")])
         self.assertEqual((d["totals"]["purchase_total"], d["totals"]["returned_total"], d["totals"]["to_pay"]),
                          ("100.00", "50.00", "50.00"))
 

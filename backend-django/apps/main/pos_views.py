@@ -4171,6 +4171,9 @@ def _execute_sale_return(
     # Чем деньги фактически отдали: "cash" | "original" (по умолчанию) | способ безнала.
     refund_method = payload.get("refund_method")
     line_reason = "defect" if is_defect else (str(payload.get("reason") or "")[:255] or None)
+    # ТЗ 31.10 п.3: снимок чека до изменения — ответ API показывает исходный чек.
+    from apps.main.sale_original import sale_snapshot
+    sale_before = sale_snapshot(sale)
 
     returned_lines = []
     if not partial_items:
@@ -4451,6 +4454,7 @@ def _execute_sale_return(
             "refund_method": _effective_refund_method(sale, refund_method),
             "refund_cash": refund_cash,
             "refund_noncash": refund_noncash,
+            "sale_before": sale_before,
         }
     )
 

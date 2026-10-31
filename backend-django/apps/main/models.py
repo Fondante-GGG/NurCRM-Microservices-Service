@@ -2990,6 +2990,9 @@ class SaleReturn(models.Model):
     refund_noncash = models.DecimalField(
         max_digits=12, decimal_places=2, default=Decimal("0.00"), verbose_name="Возвращено безналом"
     )
+    # ТЗ 31.10 п.3: чек до этого возврата (шапка, оплаты, строки) — ответ API показывает
+    # исходный чек по снимку первого возврата (apps/main/sale_original.py).
+    sale_before = models.JSONField(null=True, blank=True, verbose_name="Чек до возврата")
     created_at = models.DateTimeField(auto_now_add=True, verbose_name="Дата возврата")
 
     class Meta:

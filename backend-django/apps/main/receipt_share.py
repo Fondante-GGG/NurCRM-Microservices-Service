@@ -208,6 +208,10 @@ def render_receipt_html(data, lang, pdf_href):
         if it.get("line_discount") and it["line_discount"] != "0.00":
             disc = f'<div class="row s"><span>{e(t["discount"])}</span><span>−{e(it["line_discount"])}</span></div>'
         tag = f' <span class="st returned">{e(t["returned"])}</span>' if it.get("returned") else ""
+        r_qty = it.get("returned_qty")
+        if not it.get("returned") and r_qty and r_qty not in ("0", "0.000"):
+            # ТЗ 31.10 п.3: строка вернулась частично — сколько вернули
+            tag = f' <span class="st returned">{e(t["returned"])}: {e(r_qty)}</span>'
         rows.append(
             f'<div class="it{" ret" if it.get("returned") else ""}"><div class="n">{e(it["name"])}{tag}</div>'
             f'<div class="row s"><span>{e(it["qty"])} × {e(it["unit_price"])}</span>'
