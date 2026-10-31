@@ -3695,13 +3695,21 @@ class ClientPhoneAwareSearchFilter(filters.SearchFilter):
         return super().filter_queryset(request, queryset, view)
 
 
+class _ClientPagination(PageNumberPagination):
+    """ТЗ 31.10 п.18: касса берёт клиентов по 500 (?page_size=500); по умолчанию — 100, как раньше."""
+    page_size = 100
+    page_size_query_param = "page_size"
+    max_page_size = 500
+
+
 @read_only_guard("can_edit_clients")
 class ClientListCreateAPIView(CompanyBranchRestrictedMixin, generics.ListCreateAPIView):
     """
-    GET  /api/main/clients/
-    POST /api/main/clients/
+    GET  /api/main/clients/      ?page_size= до 500 (по умолчанию 100), в ответе count
+    POST /api/main/clients/      Idempotency-Key
     """
     serializer_class = ClientSerializer
+    pagination_class = _ClientPagination
     filter_backends = [DjangoFilterBackend, ClientPhoneAwareSearchFilter, filters.OrderingFilter]
     filterset_fields = ["status", "date", "type", "sector"]
     search_fields = ["full_name", "phone", "email"]

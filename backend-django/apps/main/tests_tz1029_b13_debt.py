@@ -318,3 +318,15 @@ class CheckoutShiftCodesTests(B13Base):
         r = self._checkout(self.capi, STRICT, shift=str(foreign.id))
         self.assertEqual(r.status_code, 403)
         self.assertEqual(r.json()["code"], "shift_not_owned")
+
+
+class ClientsPageSizeTests(B13Base):
+    def test_page_size_500_and_count(self):
+        # ТЗ 31.10 п.18
+        from apps.main.models import Client as _C
+        _C.objects.bulk_create([_C(company=self.company, branch=self.branch, full_name=f"К{i}", phone=f"+99670{i:07d}")
+                                for i in range(150)])
+        d = self.api.get("/api/main/clients/?page_size=500").json()
+        self.assertEqual(d["count"], 151)
+        self.assertEqual(len(d["results"]), 151)
+        self.assertEqual(len(self.api.get("/api/main/clients/").json()["results"]), 100)
