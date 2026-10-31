@@ -1510,8 +1510,9 @@ class ClientPayDebtAPIView(APIView):
         raw_pm = pick_debt_method(data)
         if raw_pm == "card":
             raw_pm = "transfer"
-        if raw_pm and raw_pm not in VALID_DEBT_PAYMENT_METHODS and is_strict(request, None):
-            # ТЗ 29.10 Б-13: новый клиент получает код вместо тихой замены на transfer
+        if raw_pm and raw_pm not in VALID_DEBT_PAYMENT_METHODS:
+            # ТЗ 29.10 Б-13 / ТЗ 31.10 п.6, п.8: любой клиент получает код вместо тихой замены на transfer;
+            # способ проверяется раньше суммы
             raise ApiError(
                 "method_not_allowed", "Неизвестный способ оплаты.",
                 data={"allowed": sorted(VALID_DEBT_PAYMENT_METHODS)},

@@ -3295,7 +3295,9 @@ class SalePayDebtAPIView(MarketCashierOnlyMixin, CompanyBranchRestrictedMixin, A
                 errors["amount"] = ["Некорректная сумма."]
                 error_code = error_code or "amount_invalid"
         if errors:
-            body = dict(errors)
+            # ТЗ 31.10 п.6: amount в ошибке — строкой, как в clients/{id}/pay-debt/; списки — в fields
+            body = {k: (v[0] if k == "amount" else v) for k, v in errors.items()}
+            body["fields"] = dict(errors)
             body["code"] = error_code
             if error_code == "method_not_allowed":
                 body["data"] = {"allowed": sorted(allowed_pm)}
@@ -3362,7 +3364,8 @@ class SalePayDebtAPIView(MarketCashierOnlyMixin, CompanyBranchRestrictedMixin, A
         if pay_total > remaining:
             return Response(
                 {
-                    "amount": [f"Сумма больше остатка долга. Максимум: {remaining}."],
+                    "amount": f"Сумма больше остатка долга. Максимум: {remaining}.",
+                    "fields": {"amount": [f"Сумма больше остатка долга. Максимум: {remaining}."]},
                     "code": "amount_exceeds_debt",
                     "data": {"max": str(money(remaining))},
                 },

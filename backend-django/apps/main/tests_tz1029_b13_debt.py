@@ -197,15 +197,18 @@ class ClientPayDebtCodesTests(B13Base):
         # старый клиент без заголовка: прежнее поведение, ошибки нет
         self.assertEqual(self.pay(api=self.capi).status_code, 200)
 
-    def test_method_not_allowed_strict_only(self):
+    def test_method_not_allowed_any_client(self):
         r = self.pay(method="bitcoin", hdr=STRICT)
         self.assertEqual(r.status_code, 400)
         self.assertEqual(r.json()["code"], "method_not_allowed")
         self.assertIn("cash", r.json()["data"]["allowed"])
-        # старый клиент: тихая замена на transfer, как раньше
+        # ТЗ 31.10 п.8: и старый клиент получает ошибку (раньше — тихая замена на transfer)
         r = self.pay(method="bitcoin")
-        self.assertEqual(r.status_code, 200)
-        self.assertEqual(r.json()["payment_method"], "transfer")
+        self.assertEqual(r.status_code, 400)
+        self.assertEqual(r.json()["code"], "method_not_allowed")
+        # п.6: способ проверяется раньше суммы — и с огромной суммой тот же код
+        r = self.pay(method="bitcoin", amount="99999999")
+        self.assertEqual(r.json()["code"], "method_not_allowed")
 
 
 class PayAnyAndSalePayDebtTests(B13Base):
