@@ -92,6 +92,12 @@ def to_stream_event(ev: dict):
     elif t == "features_changed":
         out_type = "license_changed"
         ids = []
+    elif t == "supplier_debt_changed":
+        # ТЗ 31.10 п.14: раньше в поток не попадало (только в ленту main/changes)
+        out_type = "supplier_debt_changed"
+        if d.get("supplier") is not None:
+            ids = [str(d["supplier"])]
+        extra = {"supplier": str(d["supplier"]) if d.get("supplier") is not None else None}
     if out_type is None:
         return None
 
@@ -102,6 +108,7 @@ def to_stream_event(ev: dict):
         "branch": ev.get("branch"),
         "ids": ids if len(ids) <= MAX_IDS else None,
         "actor": ev.get("actor"),
+        "feed_type": t,  # ТЗ 31.10 п.14: имя этого же события в ленте main/changes
     }
     msg.update(extra)
     return msg

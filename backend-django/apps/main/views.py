@@ -7118,6 +7118,11 @@ class SupplierReturnCreateAPIView(CompanyBranchRestrictedMixin, APIView):
                 pass
         elif compensation == SupplierReturn.Compensation.DEBT_OFFSET and total_return_amount > Decimal("0"):
             _offset_supplier_debt(company, supplier, sup_return, total_return_amount)
+            # ТЗ 31.10 п.14: возврат поставщику с зачётом в долг — долг поставщику изменился
+            from apps.integrations.events import emit_event as _emit_sup
+            _emit_sup(company.id, "supplier_debt_changed", {
+                "supplier": supplier.id, "return": sup_return.id, "actor": request.user.id,
+            })
 
         resp_serializer = SupplierReturnReadSerializer(sup_return, context={"request": request})
         return Response(resp_serializer.data, status=status.HTTP_201_CREATED)

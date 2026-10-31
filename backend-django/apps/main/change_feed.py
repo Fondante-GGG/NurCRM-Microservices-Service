@@ -95,10 +95,12 @@ def record_change(company_id, type_, *, branch_id=None, actor_id=None, entity=""
 
 def serialize_event(ev) -> dict:
     from django.utils import timezone
+    from apps.main.event_names import unified_name
 
     return {
         "id": ev.id,
         "type": ev.type,
+        "event": unified_name(ev.type, ev.data),  # ТЗ 31.10 п.14: единое имя (как в WebSocket-потоке)
         "at": timezone.localtime(ev.created_at).isoformat(timespec="seconds"),
         "branch": str(ev.branch_id) if ev.branch_id else None,
         "actor": str(ev.actor_id) if ev.actor_id else None,
@@ -114,7 +116,7 @@ def record_from_emit(company_id, event, data):
     branch = d.get("branch") or d.get("branch_id")
     actor = d.get("actor") or d.get("cashier") or d.get("user")
     entity, entity_id = d.get("entity") or "", d.get("entity_id") or ""
-    for key in () if entity else ("sale", "shift", "product", "return", "order", "appointment", "deal", "client"):
+    for key in () if entity else ("sale", "shift", "product", "return", "order", "appointment", "deal", "client", "supplier"):
         if d.get(key) is not None:
             entity, entity_id = key, d.get(key)
             break
