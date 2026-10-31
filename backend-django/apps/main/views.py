@@ -218,6 +218,46 @@ def _find_receipt_deal(company, supplier_id, receipt_id):
     )
 
 
+def _offset_supplier_debt(company, supplier, sup_return, amount):
+    """
+    Возврат поставщику «списанием долга» (31.10): сначала долг сделок тех приходов, из которых возврат
+    (метка [receipt:<id>]), потом остальные открытые долги поставщика — от старых к новым.
+    Списываем не больше остатка каждой сделки (prepayment += часть). Возвращает списанную сумму.
+    """
+    import logging
+
+    receipt_ids = {str(sup_return.receipt_id)} if sup_return.receipt_id else set()
+    receipt_ids |= {
+        str(r) for r in sup_return.items.exclude(receipt_item=None).values_list("receipt_item__receipt_id", flat=True)
+    }
+    deals = list(
+        ClientDeal.objects.select_for_update()
+        .filter(company=company, client=supplier, kind=ClientDeal.Kind.DEBT)
+        .order_by("created_at")
+    )
+    tagged = [d for d in deals if any(_receipt_marker(r) in (d.note or "") for r in receipt_ids)]
+    ordered = tagged + [d for d in deals if d not in tagged]
+    # сумма возврата считается с 3 знаками (цена × кол-во), долг хранится в копейках: без округления
+    # сохранение падало, а старый код глотал ошибку — долг не уменьшался
+    total = Decimal(str(amount)).quantize(Decimal("0.01"))
+    left = total
+    for deal in ordered:
+        if left <= 0:
+            break
+        rem = deal.remaining_debt
+        if rem <= 0:
+            continue
+        take = min(left, rem)
+        deal.prepayment = (deal.prepayment or Decimal("0")) + take
+        deal.save(update_fields=["prepayment", "updated_at"])
+        left -= take
+    if left > 0:
+        logging.getLogger(__name__).warning(
+            "supplier return %s: debt offset left %s not applied (no open debt)", sup_return.pk, left
+        )
+    return total - left
+
+
 def _supplier_debt_total(company, supplier_id):
     """Реальный долг поставщика: остаток по сделкам kind=debt (как kpis.debt)."""
     total = Decimal("0.00")
@@ -6971,14 +7011,7 @@ class SupplierReturnCreateAPIView(CompanyBranchRestrictedMixin, APIView):
             except Exception:
                 pass
         elif compensation == SupplierReturn.Compensation.DEBT_OFFSET and total_return_amount > Decimal("0"):
-            try:
-                deal = ClientDeal.objects.filter(company=company, client=supplier, kind=ClientDeal.Kind.DEBT).order_by("-created_at").first()
-                if deal:
-                    new_pre = (deal.prepayment or Decimal("0")) + total_return_amount
-                    deal.prepayment = min(deal.amount, new_pre)
-                    deal.save(update_fields=["prepayment"])
-            except Exception:
-                pass
+            _offset_supplier_debt(company, supplier, sup_return, total_return_amount)
 
         resp_serializer = SupplierReturnReadSerializer(sup_return, context={"request": request})
         return Response(resp_serializer.data, status=status.HTTP_201_CREATED)
