@@ -26,6 +26,9 @@ FEATURES = (
     "strict_permissions", "route_not_found", "client_header", "employee_limits", "support_constructor",
     "events_stream",  # ТЗ 29.10 Б-102: WebSocket ws/main/events/ (SSE-адрес отвечает use_websocket)
     "etag_304", "purchases",
+    # ТЗ 31.10 п.16: только то, что уже работает на сервере (receipt_patch, transfer_documents,
+    # stock_balance, agents — добавятся вместе с функциями)
+    "share_link", "receipt_attachments", "purchase_signature", "server_addons", "product_archive", "bulk_pay_debt",
 )
 
 
