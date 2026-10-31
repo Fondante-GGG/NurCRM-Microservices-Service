@@ -6910,10 +6910,12 @@ class SupplierReturnCreateAPIView(CompanyBranchRestrictedMixin, APIView):
     """
     POST /api/main/suppliers/<uuid:supplier_id>/returns/
     POST /api/main/suppliers/returns/
+    Idempotency-Key (заголовок или idempotency_key в теле): повтор → тот же ответ, replayed=true (ТЗ 31.10 п.1).
     """
 
     permission_classes = [permissions.IsAuthenticated]
 
+    @idempotent(body_key=True, replay_flag=True)
     @transaction.atomic
     def post(self, request, supplier_id=None):
         company = self._company()

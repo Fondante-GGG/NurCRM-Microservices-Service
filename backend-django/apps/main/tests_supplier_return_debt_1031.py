@@ -56,3 +56,18 @@ class SupplierReturnDebtOffsetTests(TestCase):
         self.ret(rid1, 2)            # возврат 20 по погашенному приходу → уходит на открытый долг
         d2.refresh_from_db()
         self.assertEqual(d2.remaining_debt, Decimal("80.00"))
+
+    def test_return_same_key_no_second_return(self):
+        # ТЗ 31.10 п.1: повтор возврата поставщику с тем же ключом не создаёт второй возврат
+        from apps.main.models import SupplierReturn
+        rid, _ = self.receipt(10)
+        item = SupplierReceiptItem.objects.get(receipt_id=rid)
+        body = {"receipt_id": rid, "reason": "defect", "compensation": "none",
+                "items": [{"product_id": str(self.p.id), "qty": 1, "receipt_item_id": str(item.id)}]}
+        url = f"/api/main/suppliers/{self.sup.id}/returns/"
+        r1 = self.api.post(url, body, format="json", HTTP_IDEMPOTENCY_KEY="ret-1")
+        r2 = self.api.post(url, body, format="json", HTTP_IDEMPOTENCY_KEY="ret-1")
+        self.assertEqual(r1.status_code, 201, r1.data)
+        self.assertEqual(r2.status_code, 201)
+        self.assertTrue(r2.data.get("replayed"))
+        self.assertEqual(SupplierReturn.objects.filter(company=self.company).count(), 1)
