@@ -115,7 +115,7 @@ T = {
     "ru": {"receipt": "Чек", "qty": "Кол-во", "price": "Цена", "sum": "Сумма", "discount": "Скидка",
            "subtotal": "Без скидки", "total": "Итого", "paid_by": "Оплата", "cashier": "Кассир",
            "client": "Покупатель", "bonus_earned": "Бонусов начислено", "bonus_redeemed": "Оплачено бонусами",
-           "returned": "Возвращено", "pdf": "Скачать PDF", "print": "Печать", "not_found": "Чек не найден",
+           "returned": "Возвращено", "purchase_total": "Сумма покупки", "to_pay": "К оплате", "pdf": "Скачать PDF", "print": "Печать", "not_found": "Чек не найден",
            "not_found_text": "Ссылка неверная, отозвана или срок её действия истёк.",
            "status": {"paid": "Оплачен", "partially_returned": "Частично возвращён", "returned": "Возвращён",
                       "debt": "В долг"},
@@ -124,7 +124,7 @@ T = {
     "ky": {"receipt": "Чек", "qty": "Саны", "price": "Баасы", "sum": "Суммасы", "discount": "Арзандатуу",
            "subtotal": "Арзандатуусуз", "total": "Жыйынтык", "paid_by": "Төлөм", "cashier": "Кассир",
            "client": "Сатып алуучу", "bonus_earned": "Бонус кошулду", "bonus_redeemed": "Бонус менен төлөндү",
-           "returned": "Кайтарылды", "pdf": "PDF жүктөө", "print": "Басып чыгаруу", "not_found": "Чек табылган жок",
+           "returned": "Кайтарылды", "purchase_total": "Сатып алуу суммасы", "to_pay": "Төлөнүүчү сумма", "pdf": "PDF жүктөө", "print": "Басып чыгаруу", "not_found": "Чек табылган жок",
            "not_found_text": "Шилтеме туура эмес, жокко чыгарылган же мөөнөтү бүткөн.",
            "status": {"paid": "Төлөнгөн", "partially_returned": "Жарым-жартылай кайтарылган",
                       "returned": "Кайтарылган", "debt": "Карызга"},
@@ -133,7 +133,7 @@ T = {
     "uz": {"receipt": "Chek", "qty": "Soni", "price": "Narxi", "sum": "Summa", "discount": "Chegirma",
            "subtotal": "Chegirmasiz", "total": "Jami", "paid_by": "To'lov", "cashier": "Kassir",
            "client": "Xaridor", "bonus_earned": "Bonus qo'shildi", "bonus_redeemed": "Bonus bilan to'landi",
-           "returned": "Qaytarildi", "pdf": "PDF yuklab olish", "print": "Chop etish", "not_found": "Chek topilmadi",
+           "returned": "Qaytarildi", "purchase_total": "Xarid summasi", "to_pay": "To'lov uchun", "pdf": "PDF yuklab olish", "print": "Chop etish", "not_found": "Chek topilmadi",
            "not_found_text": "Havola noto'g'ri, bekor qilingan yoki muddati tugagan.",
            "status": {"paid": "To'langan", "partially_returned": "Qisman qaytarilgan", "returned": "Qaytarilgan",
                       "debt": "Qarzga"},
@@ -142,7 +142,7 @@ T = {
     "tr": {"receipt": "Fiş", "qty": "Adet", "price": "Fiyat", "sum": "Tutar", "discount": "İndirim",
            "subtotal": "İndirimsiz", "total": "Toplam", "paid_by": "Ödeme", "cashier": "Kasiyer",
            "client": "Müşteri", "bonus_earned": "Kazanılan bonus", "bonus_redeemed": "Bonusla ödenen",
-           "returned": "İade edildi", "pdf": "PDF indir", "print": "Yazdır", "not_found": "Fiş bulunamadı",
+           "returned": "İade edildi", "purchase_total": "Alışveriş tutarı", "to_pay": "Ödenecek tutar", "pdf": "PDF indir", "print": "Yazdır", "not_found": "Fiş bulunamadı",
            "not_found_text": "Bağlantı geçersiz, iptal edilmiş veya süresi dolmuş.",
            "status": {"paid": "Ödendi", "partially_returned": "Kısmen iade", "returned": "İade edildi",
                       "debt": "Borç"},
@@ -151,7 +151,7 @@ T = {
     "en": {"receipt": "Receipt", "qty": "Qty", "price": "Price", "sum": "Amount", "discount": "Discount",
            "subtotal": "Before discount", "total": "Total", "paid_by": "Payment", "cashier": "Cashier",
            "client": "Customer", "bonus_earned": "Bonus earned", "bonus_redeemed": "Paid with bonus",
-           "returned": "Refunded", "pdf": "Download PDF", "print": "Print", "not_found": "Receipt not found",
+           "returned": "Refunded", "purchase_total": "Purchase total", "to_pay": "To pay", "pdf": "Download PDF", "print": "Print", "not_found": "Receipt not found",
            "not_found_text": "The link is invalid, revoked or expired.",
            "status": {"paid": "Paid", "partially_returned": "Partially refunded", "returned": "Refunded",
                       "debt": "On credit"},
@@ -182,7 +182,7 @@ h1{font-size:18px;margin:0 0 2px;text-align:center}.muted{color:#6b7280;font-siz
 .meta{display:flex;justify-content:space-between;margin:12px 0 8px;font-size:13px;color:#374151}
 .st{display:inline-block;padding:2px 8px;border-radius:999px;font-size:12px;background:#dcfce7;color:#166534}
 .st.partially_returned,.st.debt{background:#fef3c7;color:#92400e}.st.returned{background:#fee2e2;color:#991b1b}
-.it{border-top:1px dashed #e5e7eb;padding:8px 0}.it .n{font-weight:500;word-break:break-word}
+.it{border-top:1px dashed #e5e7eb;padding:8px 0}.it.ret{opacity:.75}.it .n{font-weight:500;word-break:break-word}
 .row{display:flex;justify-content:space-between;gap:8px;font-size:14px}.row.s{color:#6b7280;font-size:13px}
 .tot{border-top:2px solid #111;margin-top:8px;padding-top:8px}.tot .row.b{font-weight:700;font-size:17px}
 .btns{display:flex;gap:8px;margin-top:16px}.btns a,.btns button{flex:1;text-align:center;padding:11px;border-radius:10px;
@@ -206,8 +206,9 @@ def render_receipt_html(data, lang, pdf_href):
         disc = ""
         if it.get("line_discount") and it["line_discount"] != "0.00":
             disc = f'<div class="row s"><span>{e(t["discount"])}</span><span>−{e(it["line_discount"])}</span></div>'
+        tag = f' <span class="st returned">{e(t["returned"])}</span>' if it.get("returned") else ""
         rows.append(
-            f'<div class="it"><div class="n">{e(it["name"])}</div>'
+            f'<div class="it{" ret" if it.get("returned") else ""}"><div class="n">{e(it["name"])}{tag}</div>'
             f'<div class="row s"><span>{e(it["qty"])} × {e(it["unit_price"])}</span>'
             f'<span>{e(it["total"])}</span></div>{disc}</div>'
         )
@@ -220,7 +221,13 @@ def render_receipt_html(data, lang, pdf_href):
     if tt.get("discount_total") and tt["discount_total"] != "0.00":
         tot.append(line(t["subtotal"], tt["subtotal"]))
         tot.append(line(t["discount"], "−" + tt["discount_total"]))
-    tot.append(line(t["total"], tt["total"], "row b"))
+    has_return = bool(tt.get("returned_total") and tt["returned_total"] != "0.00")
+    if has_return:  # 31.10: сумма покупки, возвращено, к оплате
+        tot.append(line(t["purchase_total"], tt["purchase_total"]))
+        tot.append(line(t["returned"], "−" + tt["returned_total"]))
+        tot.append(line(t["to_pay"], tt["to_pay"], "row b"))
+    else:
+        tot.append(line(t["total"], tt["total"], "row b"))
     for p in data.get("payments") or []:
         tot.append(line(f'{t["paid_by"]}: {_pay_label(t, p["method"])}', p["amount"], "row s"))
     b = data.get("bonus") or {}
@@ -228,8 +235,6 @@ def render_receipt_html(data, lang, pdf_href):
         tot.append(line(t["bonus_redeemed"], b["redeemed"], "row s"))
     if b.get("earned") and b["earned"] != "0.00":
         tot.append(line(t["bonus_earned"], "+" + b["earned"], "row s"))
-    if tt.get("returned_total") and tt["returned_total"] != "0.00":
-        tot.append(line(t["returned"], tt["returned_total"], "row s"))
     if data.get("cashier"):
         tot.append(line(t["cashier"], data["cashier"], "row s"))
     if data.get("client"):

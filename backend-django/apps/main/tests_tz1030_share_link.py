@@ -8,7 +8,7 @@ from django.utils import timezone
 from rest_framework.test import APIClient
 
 from apps.construction.models import Cashbox
-from apps.main.models import Client, Sale, SaleItem, SalePayment, SaleReceiptLink
+from apps.main.models import Client, Sale, SaleItem, SalePayment, SaleReceiptLink, SaleReturn
 from apps.main.tests_tz_n32_media_receipts import LOCMEM, _mk_company
 
 
@@ -116,6 +116,47 @@ class ShareLinkTests(TestCase):
         self.sale.status = Sale.Status.PARTIALLY_RETURNED
         self.sale.save(update_fields=["status"])
         self.assertIn("Частично возвращён", self.pub.get(f"/r/{tok}").content.decode())
+
+    def test_full_return_shows_returned_lines(self):
+        # 31.10: полный возврат удаляет SaleItem — чек всё равно показывает позиции с пометкой «Возвращено»
+        tok = self.share().json()["token"]
+        item = self.sale.items.get()
+        SaleReturn.objects.create(
+            sale=self.sale, company=self.company, idempotency_key="k1", returned_amount=Decimal("100.00"), is_full=True,
+            returned_items=[{"sale_item": str(item.id), "name": "Хлеб", "qty": "2.000", "price": "50.00",
+                             "discount": "0.00", "total": "100.00", "amount": "100.00"}])
+        item.delete()
+        self.sale.status = Sale.Status.CANCELED
+        self.sale.save(update_fields=["status"])
+        d = self.pub.get(f"/api/public/receipts/{tok}/").json()
+        self.assertEqual(len(d["items"]), 1)
+        self.assertTrue(d["items"][0]["returned"])
+        self.assertEqual((d["items"][0]["name"], d["items"][0]["total"]), ("Хлеб", "100.00"))
+        self.assertEqual((d["totals"]["purchase_total"], d["totals"]["returned_total"], d["totals"]["to_pay"]),
+                         ("100.00", "100.00", "0.00"))
+        html = self.pub.get(f"/r/{tok}", HTTP_ACCEPT_LANGUAGE="ru").content.decode()
+        for x in ("Хлеб", "Возвращено", "Сумма покупки", "К оплате", "Возвращён"):
+            self.assertIn(x, html)
+        pdf = self.pub.get(f"/r/{tok}.pdf")
+        self.assertEqual(pdf.status_code, 200)
+        self.assertTrue(pdf.content.startswith(b"%PDF"))
+
+    def test_partial_return_totals(self):
+        tok = self.share().json()["token"]
+        item = self.sale.items.get()
+        SaleReturn.objects.create(
+            sale=self.sale, company=self.company, idempotency_key="k2", returned_amount=Decimal("50.00"), is_full=False,
+            returned_items=[{"sale_item": str(item.id), "name": "Хлеб", "qty": "1.000", "price": "50.00",
+                             "discount": "0.00", "total": "50.00", "amount": "50.00"}])
+        item.quantity = Decimal("1")
+        item.save(update_fields=["quantity"])
+        self.sale.total = Decimal("50.00")
+        self.sale.status = Sale.Status.PARTIALLY_RETURNED
+        self.sale.save(update_fields=["total", "status"])
+        d = self.pub.get(f"/api/public/receipts/{tok}/").json()
+        self.assertEqual([i["returned"] for i in d["items"]], [False, True])
+        self.assertEqual((d["totals"]["purchase_total"], d["totals"]["returned_total"], d["totals"]["to_pay"]),
+                         ("100.00", "50.00", "50.00"))
 
     def test_robots(self):
         r = self.pub.get("/robots.txt")
