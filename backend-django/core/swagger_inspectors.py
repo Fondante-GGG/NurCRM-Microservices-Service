@@ -29,10 +29,10 @@ class UniqueRefNameSerializerInspector(ReferencingSerializerInspector):
         return f'{prefix}_{ref_name}'
 
 
-from drf_yasg.renderers import OpenAPIRenderer  # noqa: E402
+def use_unique_ref_names():
+    """Ставит инспектор вместо стандартного ReferencingSerializerInspector (вызывается из core/urls.py)."""
+    from drf_yasg.inspectors import ReferencingSerializerInspector as _Base, ViewInspector
 
-
-class OpenAPIJsonRenderer(OpenAPIRenderer):
-    """`?format=openapi` с заголовком Accept: application/json (иначе 406)."""
-    media_type = 'application/json'
-    format = 'openapi'
+    ViewInspector.field_inspectors = [
+        UniqueRefNameSerializerInspector if i is _Base else i for i in ViewInspector.field_inspectors
+    ]

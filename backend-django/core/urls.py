@@ -31,6 +31,9 @@ if settings.ENABLE_API_DOCS:
     from rest_framework import permissions
     from drf_yasg.views import get_schema_view
     from drf_yasg import openapi
+    from core.swagger_inspectors import use_unique_ref_names
+
+    use_unique_ref_names()  # ТЗ 31.10 п.15 (не через SWAGGER_SETTINGS — там круговой импорт)
 
     schema_view = get_schema_view(
        openapi.Info(
