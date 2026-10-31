@@ -1082,6 +1082,7 @@ class RecipeItemReadSerializer(serializers.ModelSerializer):
 
 class ProductSerializer(CompanyBranchReadOnlyMixin, serializers.ModelSerializer):
     # ====== базовые поля компании/филиала ======
+    is_archived = serializers.SerializerMethodField()  # 31.10: товар в архиве (только чтение)
     company = serializers.ReadOnlyField(source="company.id")
     branch = serializers.ReadOnlyField(source="branch.id")
 
@@ -1260,10 +1261,14 @@ class ProductSerializer(CompanyBranchReadOnlyMixin, serializers.ModelSerializer)
 
         return serialize_sale_units(obj)
 
+    def get_is_archived(self, obj):
+        return getattr(obj, "status", None) == "archived"
+
     class Meta:
         model = Product
         fields = [
             "id", "company", "branch",
+            "is_archived",
             "kind",
             "hotkey_group",
             "upsell_priority",

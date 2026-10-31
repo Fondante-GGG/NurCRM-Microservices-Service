@@ -260,7 +260,8 @@ class AuditAndTrashTests(BuhBase):
         self.assertEqual(self.client.get("/api/main/trash/", {"type": "brand"}).data["count"], 1)
         self.assertEqual(self.client.post(f"/api/main/trash/brand/{br.id}/restore/").status_code, 200)
 
-    def test_archived_product_barcode_released(self):
+    def test_product_with_sales_not_deleted_409(self):
+        # 31.10 (ТЗ п.2): товар с историей не удаляется и молча не архивируется — 409, архив отдельной кнопкой
         from decimal import Decimal
         from apps.main.models import Product, Sale, SaleItem
 
@@ -268,15 +269,13 @@ class AuditAndTrashTests(BuhBase):
         sale = Sale.objects.create(company=self.company, status=Sale.Status.PAID, total=Decimal("100"), cashbox=self.box)
         SaleItem.objects.create(sale=sale, product=p, name_snapshot="Мыло", quantity=Decimal("1"), unit_price=Decimal("100"))
         self.client.force_authenticate(self.owner)
-        self.assertEqual(self.client.delete(f"/api/main/products/{p.id}/").status_code, 204)
-        p.refresh_from_db()
-        self.assertEqual(p.status, Product.Status.ARCHIVED)
-        self.assertIsNone(p.barcode)
-        self._product(name="Другой", barcode="4600000000011")  # не падает на уникальности
-        r = self.client.post(f"/api/main/trash/product/{p.id}/restore/")
-        self.assertEqual(r.status_code, 200, r.data)
+        r = self.client.delete(f"/api/main/products/{p.id}/")
+        self.assertEqual(r.status_code, 409, r.data)
+        self.assertEqual(r.data["code"], "product_has_history")
+        self.assertEqual(r.data["data"]["sales"], 1)
         p.refresh_from_db()
         self.assertNotEqual(p.status, Product.Status.ARCHIVED)
+        self.assertIsNotNone(p.barcode)
 
 
 class PinTests(BuhBase):

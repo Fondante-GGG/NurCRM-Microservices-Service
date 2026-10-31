@@ -1027,7 +1027,7 @@ def _annotate_product_is_favorite(qs, company_id=None):
     return qs.annotate(is_favorite=Value(False, output_field=BooleanField()))
 
 
-def _filter_products_company_only(view, qs):
+def _filter_products_company_only(view, qs, include_archived=False):
     """
     Products in main:
     - по умолчанию отдаем каталог компании (company-level items);
@@ -1046,7 +1046,7 @@ def _filter_products_company_only(view, qs):
 
     # Удалённый товар с историей продаж остаётся в базе со статусом archived —
     # в каталоге его не показываем (архив — только по ?include_archived=1 или ?status=archived).
-    show_archived = bool(qp) and (
+    show_archived = include_archived or bool(qp) and (
         str(qp.get("include_archived") or "").strip().lower() in ("1", "true", "yes")
         or str(qp.get("status") or "").strip().lower() == Product.Status.ARCHIVED
     )
@@ -2500,6 +2500,29 @@ class ProductCreateManualAPIView(CompanyBranchRestrictedMixin, generics.CreateAP
         return Response(ser.data, status=status.HTTP_201_CREATED)
 
 
+def _product_history_counts(product):
+    """31.10: сколько документов ссылается на товар. Пусто — истории нет, удалять можно."""
+    data = {
+        "receipts": product.supplier_receipt_items.count(),
+        "sales": product.sale_items.count(),
+        "transfers": product.transfer_items_as_source.count() + product.transfer_items_as_dest.count(),
+        "supplier_returns": product.supplier_return_items.count(),
+        "purchase_orders": product.purchase_order_lines.count(),
+    }
+    return data if any(data.values()) else None
+
+
+def _product_history_response(history):
+    return Response(
+        {
+            "code": "product_has_history",
+            "detail": "Товар нельзя удалить: по нему есть приходы, продажи или перемещения. Его можно отправить в архив.",
+            "data": history,
+        },
+        status=status.HTTP_409_CONFLICT,
+    )
+
+
 @flag_guard("can_view_products")  # ТЗ Н-16: запись товаров — только тем, у кого есть доступ к товарам
 @read_only_guard("can_edit_products")
 @pin_guard("DELETE")
@@ -2542,6 +2565,11 @@ class ProductRetrieveUpdateDestroyAPIView(TrashDestroyMixin, CompanyBranchRestri
         return ctx
 
     def destroy(self, request, *args, **kwargs):
+        # 31.10 (ТЗ п.2): товар с историей не удаляем и молча не архивируем — 409, архив отдельной кнопкой
+        obj = self.get_object()
+        history = _product_history_counts(obj)
+        if history:
+            return _product_history_response(history)
         try:
             return super().destroy(request, *args, **kwargs)
         except ProtectedError:
@@ -2992,6 +3020,11 @@ class ProductBulkDeleteAPIView(CompanyBranchRestrictedMixin, APIView):
         def _delete_one(p: Product):
             try:
                 pname, ppk = p.name, p.pk
+                history = _product_history_counts(p)
+                if history:  # 31.10: товар с историей не удаляем
+                    results["protected"].append(str(ppk))
+                    results.setdefault("history", {})[str(ppk)] = history
+                    return
                 with transaction.atomic():
                     entry = _trash.record(request, "product", p)
                     if soft and hasattr(p, "is_active"):
@@ -3001,7 +3034,7 @@ class ProductBulkDeleteAPIView(CompanyBranchRestrictedMixin, APIView):
                         p.delete()
                     _trash.finalize(entry, "product", p)
                 admin_audit.log_request(request, "delete", "product", ppk, pname, company=p.company)
-                results["deleted"].append(str(p.id))
+                results["deleted"].append(str(ppk))  # 31.10: p.id после физического удаления = None
             except ProtectedError:
                 results["protected"].append(str(p.id))
 
@@ -3015,6 +3048,8 @@ class ProductBulkDeleteAPIView(CompanyBranchRestrictedMixin, APIView):
             except ProtectedError:
                 return Response(
                     {
+                        "code": "product_has_history",
+                        "history": results.get("history", {}),
                         "detail": "Некоторые продукты защищены связями, удаление откатено.",
                         "protected": results["protected"],
                         "not_found": results["not_found"],
@@ -3028,6 +3063,38 @@ class ProductBulkDeleteAPIView(CompanyBranchRestrictedMixin, APIView):
 
         http_status = status.HTTP_200_OK if not results["protected"] else status.HTTP_207_MULTI_STATUS
         return Response(results, status=http_status)
+
+
+
+@flag_guard("can_view_products")
+@read_only_guard("can_edit_products")
+@pin_guard()
+class ProductArchiveAPIView(CompanyBranchRestrictedMixin, APIView):
+    """
+    POST /api/main/products/<pk>/archive/ и /unarchive/ (31.10, ТЗ п.2).
+    Архив — статус archived: товар пропадает из каталога и кассы, история остаётся.
+    Разархивация возвращает обычный статус (у обычных товаров он пустой).
+    """
+    archive = True
+
+    @transaction.atomic
+    def post(self, request, pk, *args, **kwargs):
+        product = get_object_or_404(_filter_products_company_only(self, Product.objects.all(), include_archived=True), pk=pk)
+        if self.archive:
+            if product.status != Product.Status.ARCHIVED:
+                product.status = Product.Status.ARCHIVED
+                product.save(update_fields=["status", "updated_at"])
+                # для кассы архивный товар — удалённый (как при архивации по истории)
+                ProductDeletion.objects.create(company_id=product.company_id, product_id=product.pk)
+        elif product.status == Product.Status.ARCHIVED:
+            product.status = None
+            product.save(update_fields=["status", "updated_at"])
+            ProductDeletion.objects.filter(company_id=product.company_id, product_id=product.pk).delete()
+        return Response({"id": str(product.pk), "is_archived": product.status == Product.Status.ARCHIVED})
+
+
+class ProductUnarchiveAPIView(ProductArchiveAPIView):
+    archive = False
 
 
 class ProductByBarcodeAPIView(CompanyBranchRestrictedMixin, generics.RetrieveAPIView):

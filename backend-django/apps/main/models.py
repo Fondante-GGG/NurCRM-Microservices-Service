@@ -3876,7 +3876,7 @@ class PurchaseOrder(models.Model):
 class PurchaseOrderLine(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     order = models.ForeignKey(PurchaseOrder, on_delete=models.CASCADE, related_name="lines")
-    product = models.ForeignKey(Product, on_delete=models.CASCADE, related_name="purchase_order_lines")
+    product = models.ForeignKey(Product, on_delete=models.PROTECT, related_name="purchase_order_lines")
     qty = models.DecimalField(max_digits=12, decimal_places=3)
     purchase_price = models.DecimalField(max_digits=11, decimal_places=3, null=True, blank=True)
     received_qty = models.DecimalField(max_digits=12, decimal_places=3, default=Decimal("0"))
@@ -3888,7 +3888,7 @@ class PurchaseOrderLine(models.Model):
 class SupplierReceiptItem(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     receipt = models.ForeignKey(SupplierReceipt, on_delete=models.CASCADE, related_name="items", db_index=True)
-    product = models.ForeignKey(Product, on_delete=models.CASCADE, related_name="supplier_receipt_items", db_index=True)
+    product = models.ForeignKey(Product, on_delete=models.PROTECT, related_name="supplier_receipt_items", db_index=True)
     qty = models.PositiveIntegerField()
     purchase_price = models.DecimalField(max_digits=11, decimal_places=3, null=True, blank=True)
     # ТЗ Н-33: закупка за единицу с учётом скидки и доп. расходов (только если они переданы)
@@ -4003,7 +4003,7 @@ class SupplierReturn(models.Model):
 class SupplierReturnItem(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     supplier_return = models.ForeignKey(SupplierReturn, on_delete=models.CASCADE, related_name="items", db_index=True)
-    product = models.ForeignKey(Product, on_delete=models.CASCADE, related_name="supplier_return_items", db_index=True)
+    product = models.ForeignKey(Product, on_delete=models.PROTECT, related_name="supplier_return_items", db_index=True)
     receipt_item = models.ForeignKey(SupplierReceiptItem, on_delete=models.SET_NULL, null=True, blank=True, related_name="returns", db_index=True)
     qty = models.DecimalField(max_digits=12, decimal_places=3)
     purchase_price = models.DecimalField(max_digits=12, decimal_places=3, null=True, blank=True)
