@@ -80,6 +80,7 @@ class ReturnCheckDiscountTests(TestCase):
         self.assertEqual(r.data["code"], "refund_exceeds_paid")
         self.assertEqual(r.data["data"]["paid"], "75.00")
         self.assertEqual(r.data["data"]["refundable"], "0.00")
+        self.assertIn("line_id", r.data["data"]); self.assertEqual(r.data["data"]["max_amount"], "0.00")
 
     def test_all_lines_partially_equal_paid(self):
         sale, (a, b) = self.make_sale()

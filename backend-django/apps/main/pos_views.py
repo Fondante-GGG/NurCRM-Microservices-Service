@@ -4093,6 +4093,11 @@ def _refund_exceeds_paid_error(request, sale):
             "refunded": str(money(refunded)),
             "requested": str(money(Decimal(str(sale.total or 0)))),
             "refundable": "0.00",
+            # ТЗ 31.10 п.9: тот же набор полей, что у ошибки по строке (чек целиком — line_id нет)
+            "line_id": None,
+            "requested_quantity": None,
+            "max_quantity": "0.000",
+            "max_amount": "0.00",
         },
     )
 

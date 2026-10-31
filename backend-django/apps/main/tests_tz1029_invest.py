@@ -60,6 +60,7 @@ class InvestTz1029Tests(KassaBase):
         # больше чистой прибыли месяца начислить нельзя
         r = self.api.post("/api/main/investor-payouts/", {"investor": inv, "month": month, "accrued": "90000"}, format="json")
         self.assertEqual(r.status_code, 400, r.content[:300])
+        self.assertEqual(r.json()["code"], "payout_over_profit")  # ТЗ 31.10 п.9: строкой, не списком
         # версия растёт при изменении
         r = self.api.patch(f"/api/main/investors/{inv}/", {"terms": {"percent": 30}}, format="json")
         self.assertEqual(r.json()["version"], 2)

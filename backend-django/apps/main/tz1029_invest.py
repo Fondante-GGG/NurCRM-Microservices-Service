@@ -230,10 +230,11 @@ class PayoutSerializer(serializers.ModelSerializer):
             others = others.exclude(pk=self.instance.pk)
         already = others.aggregate(s=Sum("accrued"))["s"] or Decimal("0")
         if already + accrued > max(net, Decimal("0")):
-            raise ValidationError({
-                "accrued": f"За месяц нельзя начислить больше чистой прибыли ({_q(net)}); уже начислено {_q(already)}.",
-                "code": "payout_over_profit",
-            })
+            # ТЗ 31.10 п.9: code — строкой (ValidationError делал из него список)
+            from core.exceptions import ApiError
+            msg = f"За месяц нельзя начислить больше чистой прибыли ({_q(net)}); уже начислено {_q(already)}."
+            raise ApiError("payout_over_profit", msg, fields={"accrued": [msg]},
+                           data={"net_profit": str(_q(net)), "already": str(_q(already))})
         attrs["month"], attrs["accrued"], attrs["tax"], attrs["paid"] = month, accrued, tax, paid
         return attrs
 
