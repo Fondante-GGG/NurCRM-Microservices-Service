@@ -31,6 +31,29 @@ def _performer_commission(item) -> Decimal:
     return pos_money(max(line, Decimal("0")) * Decimal(str(pct)) / Decimal("100"))
 
 
+def resolve_sale_branch(shift, cart=None, user=None):
+    """ТЗ 31.10 п.13: филиал чека. Раньше брали только shift.branch, а у смен, открытых без филиала
+    (касса «общая» или смена офлайн), чек оставался без branch. Порядок: смена -> касса смены ->
+    корзина -> основной филиал кассира."""
+    branch = getattr(shift, "branch", None)
+    if branch is None:
+        cashbox = getattr(shift, "cashbox", None)
+        branch = getattr(cashbox, "branch", None)
+    if branch is None and cart is not None:
+        branch = getattr(cart, "branch", None)
+    if branch is None:
+        cashier = user or getattr(shift, "cashier", None) or getattr(cart, "user", None)
+        primary = getattr(cashier, "primary_branch", None)
+        try:
+            branch = primary() if callable(primary) else primary
+        except Exception:
+            branch = None
+        company_id = getattr(shift, "company_id", None) or getattr(cart, "company_id", None)
+        if branch is not None and company_id and getattr(branch, "company_id", None) != company_id:
+            branch = None
+    return branch
+
+
 def checkout_cart(
     cart: Cart,
     department=None,
@@ -68,7 +91,7 @@ def checkout_cart(
         raise ValueError("Нет смены. Сначала открой смену или передай кассу и создай смену.")
 
     cashbox = shift.cashbox
-    branch = shift.branch
+    branch = resolve_sale_branch(shift, cart)  # ТЗ 31.10 п.13
 
     prod_ids = [it.product_id for it in items if it.product_id]
     products = {p.id: p for p in Product.objects.select_for_update().filter(id__in=prod_ids)}

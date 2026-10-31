@@ -452,6 +452,7 @@ def _find_offline_shift(*, company, cashier, at, shift_id=None, cashbox_id=None)
     if sh is None:
         sh = CashShift.objects.create(
             company=company,
+            branch=cashbox.branch,  # ТЗ 31.10 п.13
             cashbox=cashbox,
             cashier=cashier,
             status=CashShift.Status.CLOSED,
@@ -530,6 +531,7 @@ class PosQuickCheckoutAPIView(APIView):
         )
 
     def post(self, request, *args, **kwargs):
+        from apps.main.services import resolve_sale_branch
         from apps.main.pos_views import (
             SaleCheckoutAPIView,
             _discount_limit_error,
@@ -596,7 +598,7 @@ class PosQuickCheckoutAPIView(APIView):
                     company=company,
                     user=user,
                     status=Cart.Status.ACTIVE,
-                    branch=shift.branch,
+                    branch=resolve_sale_branch(shift, user=user),  # ТЗ 31.10 п.13
                     shift=shift,
                     is_default=False,
                     is_wholesale=bool(data.get("is_wholesale")),
