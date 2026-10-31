@@ -6171,12 +6171,11 @@ class SupplierReceiptAPIView(CompanyBranchRestrictedMixin, APIView):
         notify_variants_in_stock([v.pk for v in found.values()])
 
     def post(self, request, supplier_id):
-        # ТЗ Н-10: серверная сделка-долг и идемпотентность — только по явному "create_deal": true.
-        # Без флага запрос работает как раньше (сайт сам создаёт сделку отдельным запросом).
-        if _truthy(request.data.get("create_deal")):
-            handler = idempotent(body_key=True, replay_flag=True)(type(self)._post_impl)
-            return handler(self, request, supplier_id)
-        return self._post_impl(request, supplier_id)
+        # ТЗ Н-10: серверная сделка-долг — только по явному "create_deal": true.
+        # Идемпотентность — всегда, когда передан Idempotency-Key (заголовок или idempotency_key в теле):
+        # повтор с тем же ключом не проводит второй приход (31.10: раньше без create_deal ключ игнорировался).
+        handler = idempotent(body_key=True, replay_flag=True)(type(self)._post_impl)
+        return handler(self, request, supplier_id)
 
     @transaction.atomic
     def _post_impl(self, request, supplier_id):
