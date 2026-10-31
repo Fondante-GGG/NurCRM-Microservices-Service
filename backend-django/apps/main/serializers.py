@@ -3669,6 +3669,8 @@ class SupplierReceiptReadSerializer(serializers.ModelSerializer):
             "series",
             "year",
             "sequence",
+            "version",  # ТЗ 31.10 п.21
+            "comment",
             "document_number",
             "document_date",
             "attachments",

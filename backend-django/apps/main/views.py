@@ -6780,13 +6780,15 @@ class SupplierReceiptListAPIView(
         return self.paginator.get_paginated_response(serializer.data, total_amount=total_amount)
 
 
+@read_only_guard("can_edit_procurement")  # ТЗ 31.10 п.21: режим «только смотреть» запрещает PATCH
 class SupplierReceiptRetrieveAPIView(
     SupplierReceiptQuerysetMixin,
     CompanyBranchRestrictedMixin,
     generics.RetrieveAPIView,
 ):
     """
-    GET /api/main/suppliers/receipts/<uuid:pk>/
+    GET   /api/main/suppliers/receipts/<uuid:pk>/  — ответ несёт version и ETag: "<version>"
+    PATCH /api/main/suppliers/receipts/<uuid:pk>/  — правка прихода (ТЗ 31.10 п.21, см. apps/main/receipt_edit.py)
     """
 
     permission_classes = [permissions.IsAuthenticated]
@@ -6802,7 +6804,14 @@ class SupplierReceiptRetrieveAPIView(
         data = serializer.data
         items = data.get("items") or []
         data["lines"] = items
-        return Response(data)
+        resp = Response(data)
+        resp["ETag"] = f'"{instance.version}"'  # ТЗ 31.10 п.21
+        return resp
+
+    def patch(self, request, *args, **kwargs):
+        from apps.main.receipt_edit import patch_receipt
+
+        return patch_receipt(self, request, kwargs[self.lookup_url_kwarg])
 
 
 def _aggregate_purchase_batches_total_amount(item_qs):

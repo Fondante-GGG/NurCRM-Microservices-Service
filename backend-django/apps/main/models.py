@@ -3867,6 +3867,10 @@ class SupplierReceipt(models.Model):
     document_date = models.DateField(null=True, blank=True)
     attachments = models.ManyToManyField("main.MainMedia", blank=True, related_name="supplier_receipts")
 
+    # ТЗ 31.10 п.21: версия для правки прихода (If-Match / version), comment — комментарий к документу
+    version = models.PositiveIntegerField(default=1, db_default=1)
+    comment = models.TextField(blank=True, default="", db_default="")
+
     DOC_SERIES = "ПР"  # ТЗ 31.10 п.20
 
     class Meta:

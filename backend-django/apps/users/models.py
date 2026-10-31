@@ -733,6 +733,8 @@ class User(AbstractBaseUser, PermissionsMixin):
     can_edit_cashbox = models.BooleanField(null=True, blank=True, default=None, verbose_name="Менять: кассы")
     can_edit_products = models.BooleanField(null=True, blank=True, default=None, verbose_name="Менять: товары")
     can_edit_procurement = models.BooleanField(null=True, blank=True, default=None, verbose_name="Менять: закупки")
+    # ТЗ 31.10 п.21: правка проведённых приходов (NULL — по умолчанию: владелец и администратор)
+    can_edit_purchase_documents = models.BooleanField(null=True, blank=True, default=None, verbose_name="Менять: проведённые приходы")
     can_edit_documents = models.BooleanField(null=True, blank=True, default=None, verbose_name="Менять: документы склада")
     can_edit_clients = models.BooleanField(null=True, blank=True, default=None, verbose_name="Менять: клиенты и долги")
     can_edit_salary = models.BooleanField(null=True, blank=True, default=None, verbose_name="Менять: зарплата")
