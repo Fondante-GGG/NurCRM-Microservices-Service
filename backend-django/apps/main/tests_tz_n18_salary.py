@@ -113,3 +113,23 @@ class N18Tests(TestCase):
         c = APIClient()
         c.force_authenticate(self.cashier)
         self.assertEqual(c.get(URL).data["count"], 2)
+
+
+class ProrateMonthlyTests(__import__("django.test", fromlist=["SimpleTestCase"]).SimpleTestCase):
+    """ТЗ 31.10 п.10: оклад по календарным месяцам."""
+
+    def _p(self, a, b):
+        from datetime import datetime
+        from django.utils import timezone
+        from apps.main.analytics_market import Period, _prorate_monthly
+        tz = timezone.get_current_timezone()
+        return _prorate_monthly(Decimal("100000"), Period(start=timezone.make_aware(datetime(*a), tz),
+                                                          end=timezone.make_aware(datetime(*b), tz)))
+
+    def test_full_months_equal_salary(self):
+        self.assertEqual(self._p((2026, 10, 1), (2026, 11, 1)), Decimal("100000.00"))  # 31 день
+        self.assertEqual(self._p((2026, 2, 1), (2026, 3, 1)), Decimal("100000.00"))   # 28 дней
+        self.assertEqual(self._p((2026, 9, 1), (2026, 11, 1)), Decimal("200000.00"))
+
+    def test_partial_month_by_its_days(self):
+        self.assertEqual(self._p((2026, 10, 1), (2026, 10, 16)), Decimal("48387.10"))  # 15/31

@@ -485,6 +485,32 @@ class Period:
     end: datetime  # exclusive
 
 
+SALARY_CALC_BASIS = "calendar_month"  # оклад × (дни периода в месяце / дней в этом месяце), по каждому месяцу
+
+
+def _prorate_monthly(monthly, period: Period) -> Decimal:
+    """ТЗ 31.10 п.10: оклад за период по календарным месяцам. Полный месяц = ровно оклад
+    (раньше оклад / 30 × дни: за 31-дневный месяц выходило +3,3 %), неполный — доля дней этого месяца."""
+    import calendar
+    from datetime import timedelta
+
+    monthly = Decimal(str(monthly or 0))
+    tz = timezone.get_current_timezone()
+    start = timezone.localtime(period.start, tz).date() if timezone.is_aware(period.start) else period.start.date()
+    end = timezone.localtime(period.end, tz).date() if timezone.is_aware(period.end) else period.end.date()  # не включая
+    if end <= start:
+        end = start + timedelta(days=1)
+    total = Decimal("0")
+    d = start
+    while d < end:
+        dim = calendar.monthrange(d.year, d.month)[1]
+        month_end = d.replace(day=dim) + timedelta(days=1)
+        chunk = (min(end, month_end) - d).days
+        total += monthly * Decimal(chunk) / Decimal(dim)
+        d = min(end, month_end)
+    return total.quantize(Decimal("0.01"))
+
+
 def _get_period(request, *, strict: bool = False) -> Period:
     """
     strict=True (ТЗ ч.12, 2.7): даты наоборот → 400, период никогда не подменяется молча.
@@ -4123,7 +4149,7 @@ class AnalyticsView(APIView):
             pay_scheme = prof.pay_scheme if prof else MarketSaleEmployeePayProfile.PayScheme.SALARY
             pay_scheme_label = prof.get_pay_scheme_display() if prof else "Оклад"
 
-            base_part = ((monthly_base_salary or Z_MONEY) * Decimal(days) / Decimal("30")).quantize(Decimal("0.01"))
+            base_part = _prorate_monthly(monthly_base_salary or Z_MONEY, period)
 
             PS = MarketSaleEmployeePayProfile.PayScheme
             pct = (sales_percent or Z_MONEY) / Decimal("100")
@@ -4161,6 +4187,7 @@ class AnalyticsView(APIView):
                     "sales_percent": str(sales_percent or Z_MONEY),
                     "period_days": days,
                     "base_prorated": str(base_part),
+                    "calc_basis": SALARY_CALC_BASIS,  # ТЗ 31.10 п.10
                     "cashier_sales_period": str(_money(cashier_sales_period)),
                     "consultant_sales_period": str(_money(consultant_sales_period)),
                     "consultant_commission_period": str(_money(consultant_commission_period)),
