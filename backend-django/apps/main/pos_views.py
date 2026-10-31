@@ -1524,10 +1524,9 @@ def _supplier_recon_rows(company, client, start_dt, end_dt, source="both"):
             company=company, supplier=client, created_at__gte=start_dt, created_at__lte=end_dt
         ).order_by("created_at")
         for r in rcpts:
-            tot = sum(
-                (Decimal(str(i.qty)) * Decimal(str(i.purchase_price or 0)) for i in SupplierReceiptItem.objects.filter(receipt=r)),
-                Z,
-            )
+            from apps.main.views import receipt_item_amount  # ТЗ 31.10 п.19: line_total из накладной
+
+            tot = sum((receipt_item_amount(i) for i in SupplierReceiptItem.objects.filter(receipt=r)), Z)
             _row(r.created_at, f"Приход поставщика {r.id}", Z, Z, "receipt", r.id, {"doc_amount": fmt(q2(tot))})
         rets = SupplierReturn.objects.filter(
             company=company, supplier=client, status=SupplierReturn.Status.POSTED,

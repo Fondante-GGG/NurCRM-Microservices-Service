@@ -166,13 +166,15 @@ def checkout_cart(
         name_snap = (getattr(p, "name", None) or getattr(it, "custom_name", None) or "Позиция")
         barcode_snap = getattr(p, "barcode", None) or ""
         pp = (p.purchase_price or Decimal("0.00")) if p else Decimal("0.00")
+        # ТЗ 31.10 п.19: себестоимость единицы — 4 знака (раньше копейки терялись на дешёвых товарах)
+        from apps.main.models import _cost4
         if it.sale_package_id:
             ipp = Decimal(str(it.sale_package.quantity_in_package or 0))
-            snap = pos_money(pp / ipp) if ipp > 0 else pos_money(pp)
+            snap = _cost4(pp / ipp) if ipp > 0 else _cost4(pp)
         else:
-            snap = pos_money(pp)
+            snap = _cost4(pp)
         if it.sale_unit_id:  # ТЗ 26.10 Б-53: себестоимость единицы продажи = базовая x factor
-            snap = pos_money(pp * it.sale_unit.factor)
+            snap = _cost4(pp * it.sale_unit.factor)
         sale_items.append(
             SaleItem(
                 company=cart.company,

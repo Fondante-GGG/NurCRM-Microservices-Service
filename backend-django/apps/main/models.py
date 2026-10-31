@@ -28,8 +28,36 @@ from apps.consalting.models import ServicesConsalting
 # from apps.construction.models import Department   # УДАЛЕНО: отделы больше не используются
 
 _Q2 = Decimal("0.01")
+_Q4 = Decimal("0.0001")
 def _money(x: Decimal) -> Decimal:
     return (x or Decimal("0")).quantize(_Q2, rounding=ROUND_HALF_UP)
+
+
+def _cost4(x: Decimal) -> Decimal:
+    """ТЗ 31.10 п.19: себестоимость/закупка за единицу — 4 знака (деньги округляются уже в итоге)."""
+    return Decimal(str(x or 0)).quantize(_Q4, rounding=ROUND_HALF_UP)
+
+
+class PreciseDecimalField(models.DecimalField):
+    """
+    ТЗ 31.10 п.19: цена закупки с 4 знаками на больших таблицах (товары, строки продаж).
+    На Postgres колонка — numeric без ограничения точности: смена numeric(11,3) → numeric
+    не переписывает таблицу (только каталог), а numeric(14,4) переписал бы сотни МБ под
+    эксклюзивной блокировкой. Поэтому округление до decimal_places делает Django при записи
+    (save, update, bulk_create). В миграциях поле выглядит как обычный DecimalField.
+    """
+
+    def get_db_prep_value(self, value, connection, prepared=False):
+        if value is not None and not hasattr(value, "resolve_expression"):
+            try:
+                value = Decimal(str(value)).quantize(Decimal(1).scaleb(-self.decimal_places), rounding=ROUND_HALF_UP)
+            except Exception:
+                pass
+        return super().get_db_prep_value(value, connection, prepared)
+
+    def deconstruct(self):
+        name, _path, args, kwargs = super().deconstruct()
+        return name, "django.db.models.DecimalField", args, kwargs
 
 
 def product_image_upload_to(instance, filename: str) -> str:
@@ -815,10 +843,11 @@ class Product(models.Model):
     )
 
     # ---- Цены / наценка / скидка ----
-    purchase_price = models.DecimalField(
+    # ТЗ 31.10 п.19: 4 знака (было 3), колонка на Postgres — numeric без ограничения, см. PreciseDecimalField
+    purchase_price = PreciseDecimalField(
         "Цена закупки",
-        max_digits=11,
-        decimal_places=3,
+        max_digits=14,
+        decimal_places=4,
         default=0,
         help_text=(
             "За одну учётную единицу товара (как в поле «Количество/Остаток» и unit). "
@@ -3087,10 +3116,11 @@ class SaleItem(models.Model):
     )
 
     # ✅ себестоимость единицы на момент продажи (для маржи)
-    purchase_price_snapshot = models.DecimalField(
+    # ТЗ 31.10 п.19: 4 знака, как закупка товара (сумма себестоимости строки округляется до копеек)
+    purchase_price_snapshot = PreciseDecimalField(
         "Себестоимость (снапшот)",
-        max_digits=12,
-        decimal_places=2,
+        max_digits=14,
+        decimal_places=4,
         null=True,
         blank=True,
         default=None,
@@ -3160,10 +3190,10 @@ class SaleItem(models.Model):
                     if self.sale_package_id:
                         ipp = Decimal(str(self.sale_package.quantity_in_package or 0))
                         self.purchase_price_snapshot = (
-                            _money(pp / ipp) if ipp > 0 else _money(pp)
+                            _cost4(pp / ipp) if ipp > 0 else _cost4(pp)
                         )
                     else:
-                        self.purchase_price_snapshot = _money(pp)
+                        self.purchase_price_snapshot = _cost4(pp)
             else:
                 self.is_custom = True
                 # если товар не выбран — себестоимость неизвестна
@@ -3176,7 +3206,7 @@ class SaleItem(models.Model):
         if hasattr(self, "line_discount"):
             self.line_discount = _money(getattr(self, "line_discount", None) or Decimal("0.00"))
         if self.purchase_price_snapshot is not None:
-            self.purchase_price_snapshot = _money(self.purchase_price_snapshot)
+            self.purchase_price_snapshot = _cost4(self.purchase_price_snapshot)
 
         self.full_clean()
         return super().save(*args, **kwargs)
@@ -3612,17 +3642,18 @@ class ProductInventoryItem(models.Model):
         on_delete=models.CASCADE,
         related_name="inventory_lines",
     )
+    # ТЗ 31.10 п.19: остатки с 3 знаками (как Product.quantity)
     quantity_before = models.DecimalField(
         "Было на момент проведения",
         max_digits=12,
-        decimal_places=2,
+        decimal_places=3,
         null=True,
         blank=True,
     )
     quantity_fact = models.DecimalField(
         "Учётное количество (факт)",
         max_digits=12,
-        decimal_places=2,
+        decimal_places=3,
     )
 
     class Meta:
@@ -3890,7 +3921,9 @@ class SupplierReceiptItem(models.Model):
     receipt = models.ForeignKey(SupplierReceipt, on_delete=models.CASCADE, related_name="items", db_index=True)
     product = models.ForeignKey(Product, on_delete=models.PROTECT, related_name="supplier_receipt_items", db_index=True)
     qty = models.PositiveIntegerField()
-    purchase_price = models.DecimalField(max_digits=11, decimal_places=3, null=True, blank=True)
+    # ТЗ 31.10 п.19: закупка с 4 знаками; line_total — сумма строки «как в накладной» (хранится как пришла)
+    purchase_price = models.DecimalField(max_digits=14, decimal_places=4, null=True, blank=True)
+    line_total = models.DecimalField(max_digits=16, decimal_places=4, null=True, blank=True)
     # ТЗ Н-33: закупка за единицу с учётом скидки и доп. расходов (только если они переданы)
     landed_price = models.DecimalField(max_digits=14, decimal_places=4, null=True, blank=True)
 
@@ -4006,7 +4039,7 @@ class SupplierReturnItem(models.Model):
     product = models.ForeignKey(Product, on_delete=models.PROTECT, related_name="supplier_return_items", db_index=True)
     receipt_item = models.ForeignKey(SupplierReceiptItem, on_delete=models.SET_NULL, null=True, blank=True, related_name="returns", db_index=True)
     qty = models.DecimalField(max_digits=12, decimal_places=3)
-    purchase_price = models.DecimalField(max_digits=12, decimal_places=3, null=True, blank=True)
+    purchase_price = models.DecimalField(max_digits=14, decimal_places=4, null=True, blank=True)  # ТЗ 31.10 п.19
 
     class Meta:
         verbose_name = "Строка возврата поставщику"
@@ -6577,7 +6610,7 @@ class SupplierPurchase(models.Model):
 
     quantity = models.DecimalField("Количество", max_digits=14, decimal_places=3)
     unit = models.CharField("Единица", max_length=50, blank=True, default="")
-    unit_price = models.DecimalField("Цена за единицу", max_digits=12, decimal_places=2, default=Decimal("0.00"))
+    unit_price = models.DecimalField("Цена за единицу", max_digits=14, decimal_places=4, default=Decimal("0.00"))  # ТЗ 31.10 п.19
     amount = models.DecimalField("Сумма", max_digits=14, decimal_places=2, default=Decimal("0.00"))
 
     payment_type = models.CharField(
@@ -6604,10 +6637,12 @@ class SupplierPurchase(models.Model):
 
 def record_supplier_purchase(*, company, supplier, quantity, unit_price, created_by,
                              branch=None, product=None, item_make=None, product_name="",
-                             unit="", payment_type=None, purchased_at=None):
+                             unit="", payment_type=None, purchased_at=None, amount=None):
     """
     Пишет строку в журнал закупок. Вызывать ВНУТРИ транзакции операции.
     Без поставщика или с нулевым количеством запись не создаётся.
+    ТЗ 31.10 п.19: цена — 4 знака; amount (сумма по документу) — если передана, берётся как есть
+    (округление до копеек), иначе количество × цена.
     """
     if supplier is None:
         return None
@@ -6616,7 +6651,8 @@ def record_supplier_purchase(*, company, supplier, quantity, unit_price, created
     if qty <= 0:
         return None
 
-    price = Decimal(str(unit_price or 0)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    price = Decimal(str(unit_price or 0)).quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)
+    total = Decimal(str(amount)) if amount is not None else qty * price
     source = product or item_make
     return SupplierPurchase.objects.create(
         company=company,
@@ -6628,7 +6664,7 @@ def record_supplier_purchase(*, company, supplier, quantity, unit_price, created
         quantity=qty,
         unit=unit or getattr(source, "unit", "") or "",
         unit_price=price,
-        amount=(qty * price).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP),
+        amount=total.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP),
         payment_type=payment_type or SupplierPurchase.PaymentType.CASH,
         purchased_at=purchased_at or timezone.now(),
         created_by=created_by,

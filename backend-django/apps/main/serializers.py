@@ -157,6 +157,21 @@ def _restrict_pk_queryset_strict(field, base_qs, company, branch):
     field.queryset = qs
 
 
+class Price4Field(serializers.DecimalField):
+    """
+    ТЗ 31.10 п.19: цена закупки до 4 знаков. В ответе лишние нули справа убираются, но не меньше
+    2 знаков: 100.0000 → "100.00", 12.3450 → "12.345" (старые клиенты видят тот же формат).
+    """
+
+    def to_representation(self, value):
+        out = super().to_representation(value)
+        if not isinstance(out, str) or "." not in out:
+            return out
+        head, tail = out.split(".", 1)
+        tail = tail.rstrip("0")
+        return f"{head}.{tail.ljust(2, '0')}"
+
+
 class ProductImageReadSerializer(serializers.ModelSerializer):
     image_url = serializers.SerializerMethodField()
 
@@ -1185,9 +1200,10 @@ class ProductSerializer(CompanyBranchReadOnlyMixin, serializers.ModelSerializer)
     is_adult = serializers.BooleanField(required=False, default=False)
 
     # allow_null=True чтобы PATCH мог "очищать" значения
-    purchase_price = serializers.DecimalField(
-        max_digits=10,
-        decimal_places=2,
+    # ТЗ 31.10 п.19: до 4 знаков (раньше 2 — PATCH с 12.345 отклонялся)
+    purchase_price = Price4Field(
+        max_digits=14,
+        decimal_places=4,
         required=False,
         allow_null=True,
         help_text=(
@@ -1647,7 +1663,7 @@ class ProductSerializer(CompanyBranchReadOnlyMixin, serializers.ModelSerializer)
         """Чистим потенциально битые Decimal, чтобы DRF не падал на quantize()."""
         for field, quant in (
             ("quantity", self._Q3),
-            ("purchase_price", self._Q2),
+            ("purchase_price", self._Q4),  # ТЗ 31.10 п.19
             ("markup_percent", self._Q4),
             ("price", self._Q2),
             ("wholesale_price", Decimal("0.001")),
@@ -2971,6 +2987,7 @@ class ProductNestedSerializer(serializers.ModelSerializer):
 # Лёгкий сериализатор для списка товаров (минимальный набор полей)
 class ProductListSerializer(serializers.ModelSerializer):
     image_url = serializers.SerializerMethodField()
+    purchase_price = Price4Field(max_digits=14, decimal_places=4, read_only=True)  # ТЗ 31.10 п.19
     is_favorite = serializers.BooleanField(read_only=True)
     shelf_life_days = serializers.IntegerField(read_only=True)
 
@@ -3496,11 +3513,19 @@ class AcceptanceReadSerializer(serializers.ModelSerializer):
 class SupplierReceiptItemSerializer(serializers.Serializer):
     product = serializers.PrimaryKeyRelatedField(queryset=Product.objects.all())
     qty = serializers.IntegerField(min_value=1)
+    # ТЗ 31.10 п.19: закупка до 4 знаков; line_total — сумма строки по накладной (берётся как есть)
     purchase_price = serializers.DecimalField(
-        max_digits=11,
-        decimal_places=3,
+        max_digits=14,
+        decimal_places=4,
         required=False,
         allow_null=True,
+    )
+    line_total = serializers.DecimalField(
+        max_digits=16,
+        decimal_places=4,
+        required=False,
+        allow_null=True,
+        min_value=Decimal("0"),
     )
     price = serializers.DecimalField(
         max_digits=11,
@@ -3543,6 +3568,9 @@ class SupplierReceiptItemReadSerializer(serializers.ModelSerializer):
     unit = serializers.CharField(source="product.unit", read_only=True, default="шт")
     returned_qty = serializers.SerializerMethodField()
     returnable_qty = serializers.SerializerMethodField()
+    # ТЗ 31.10 п.19: закупка до 4 знаков и сумма строки по накладной
+    purchase_price = Price4Field(max_digits=14, decimal_places=4, read_only=True, allow_null=True)
+    line_total = serializers.SerializerMethodField()
     # ТЗ 30.10 «Поступления»: партия строки (Б-61) и её текущий остаток
     batch_id = serializers.SerializerMethodField()
     batch_number = serializers.SerializerMethodField()
@@ -3552,7 +3580,7 @@ class SupplierReceiptItemReadSerializer(serializers.ModelSerializer):
         model = SupplierReceiptItem
         fields = [
             "id", "product", "product_id", "product_name", "product_code",
-            "qty", "purchase_price", "returned_qty", "returnable_qty", "unit",
+            "qty", "purchase_price", "line_total", "returned_qty", "returnable_qty", "unit",
             "batch_id", "batch_number", "batch_remaining",
         ]
 
@@ -3571,6 +3599,12 @@ class SupplierReceiptItemReadSerializer(serializers.ModelSerializer):
     def get_batch_remaining(self, obj):
         b = self._batch(obj)
         return str(Decimal(str(b.remaining)).quantize(Decimal("0.001"), rounding=ROUND_HALF_UP)) if b else None
+
+    def get_line_total(self, obj):
+        """Сумма строки: line_total из накладной, если был передан, иначе количество × закупка (2 знака)."""
+        from apps.main.views import receipt_item_amount
+
+        return f"{receipt_item_amount(obj).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP):.2f}"
 
     def get_returned_qty(self, obj):
         from apps.main.models import SupplierReturnItem
@@ -3708,10 +3742,9 @@ class SupplierReceiptReadSerializer(serializers.ModelSerializer):
                 Decimal(str(annotated)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
             )
 
-        total = Decimal("0")
-        for item in obj.items.all():
-            price = item.purchase_price if item.purchase_price is not None else Decimal("0")
-            total += Decimal(str(item.qty)) * Decimal(str(price))
+        from apps.main.views import receipt_item_amount
+
+        total = sum((receipt_item_amount(item) for item in obj.items.all()), Decimal("0"))
         return str(total.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP))
 
     def get_items_count(self, obj):
@@ -3747,6 +3780,7 @@ class SupplierReturnItemReadSerializer(serializers.ModelSerializer):
     product_code = serializers.CharField(source="product.code", read_only=True)
     unit = serializers.CharField(source="product.unit", read_only=True, default="шт")
     receipt_item_id = serializers.UUIDField(source="receipt_item.id", read_only=True, allow_null=True)
+    purchase_price = Price4Field(max_digits=14, decimal_places=4, read_only=True, allow_null=True)  # ТЗ 31.10 п.19
     line_total = serializers.SerializerMethodField()
 
     class Meta:
@@ -3812,7 +3846,7 @@ class SupplierReturnReadSerializer(serializers.ModelSerializer):
 class SupplierReturnCreateItemSerializer(serializers.Serializer):
     product_id = serializers.UUIDField(required=True)
     qty = serializers.DecimalField(max_digits=12, decimal_places=3, required=True)
-    purchase_price = serializers.DecimalField(max_digits=12, decimal_places=3, required=False, allow_null=True)
+    purchase_price = serializers.DecimalField(max_digits=14, decimal_places=4, required=False, allow_null=True)  # ТЗ 31.10 п.19
     receipt_item_id = serializers.UUIDField(required=False, allow_null=True)
 
 
@@ -4678,7 +4712,7 @@ class MarketSaleEmployeePayProfileSerializer(CompanyBranchReadOnlyMixin, seriali
 # ===========================
 class ProductInventoryLineCreateSerializer(serializers.Serializer):
     product_id = serializers.UUIDField()
-    quantity_fact = serializers.DecimalField(max_digits=12, decimal_places=2)
+    quantity_fact = serializers.DecimalField(max_digits=12, decimal_places=3)  # ТЗ 31.10 п.19: 3 знака
 
 
 class ProductInventorySessionCreateSerializer(serializers.Serializer):
@@ -4717,7 +4751,7 @@ class ProductInventoryLineReadSerializer(serializers.ModelSerializer):
         if obj.quantity_before is None:
             return None
         d = Decimal(str(obj.quantity_fact or 0)) - Decimal(str(obj.quantity_before or 0))
-        return str(d.quantize(Decimal("0.01")))
+        return str(d.quantize(Decimal("0.001")))
 
 
 class ProductInventorySessionReadSerializer(serializers.ModelSerializer):

@@ -293,9 +293,7 @@ def _receipt_payment_info(receipts):
         t = getattr(r, "total_amount", None)
         if t is not None:
             return Decimal(str(t)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
-        tot = Decimal("0")
-        for it in r.items.all():
-            tot += Decimal(str(it.qty)) * Decimal(str(it.purchase_price if it.purchase_price is not None else 0))
+        tot = sum((receipt_item_amount(it) for it in r.items.all()), Decimal("0"))  # ТЗ 31.10 п.19
         return tot.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
     flows = {}
@@ -6057,14 +6055,25 @@ class SupplierPurchasesListAPIView(CompanyBranchRestrictedMixin, generics.ListAP
         })
 
 
-def _supplier_receipt_line_total_expr():
-    return ExpressionWrapper(
-        F("qty") * Coalesce(
-            F("purchase_price"),
-            V(Decimal("0"), output_field=DecimalField(max_digits=11, decimal_places=3)),
+def _supplier_receipt_line_total_expr(prefix=""):
+    """ТЗ 31.10 п.19: сумма строки — line_total из накладной, иначе qty × закупка (полная точность)."""
+    dec = DecimalField(max_digits=24, decimal_places=4)
+    return Coalesce(
+        F(f"{prefix}line_total"),
+        ExpressionWrapper(
+            F(f"{prefix}qty") * Coalesce(F(f"{prefix}purchase_price"), V(Decimal("0"), output_field=dec)),
+            output_field=dec,
         ),
-        output_field=DecimalField(max_digits=20, decimal_places=3),
+        output_field=dec,
     )
+
+
+def receipt_item_amount(item) -> Decimal:
+    """ТЗ 31.10 п.19: сумма строки прихода без округления: line_total из накладной или qty × закупка."""
+    if getattr(item, "line_total", None) is not None:
+        return Decimal(str(item.line_total))
+    pp = item.purchase_price if item.purchase_price is not None else Decimal("0")
+    return Decimal(str(item.qty)) * Decimal(str(pp))
 
 
 def _aggregate_supplier_receipts_total_amount(receipt_qs):
@@ -6169,6 +6178,8 @@ def _receipt_discount_extras(data, items, by_id):
         if pp is None:
             pp = getattr(prod, "purchase_price", None)
         line = Decimal(str(pp or 0)) * Decimal(str(int(it["qty"])))
+        if it.get("line_total") is not None:  # ТЗ 31.10 п.19: сумма по накладной
+            line = Decimal(str(it["line_total"]))
         base[id(it)] = line
         subtotal += line
 
@@ -6201,15 +6212,18 @@ def _receipt_discount_extras(data, items, by_id):
 
     delta = extra_total - disc
     landed = {}
+    lines = {}
     for it in items:
         line = base[id(it)]
         qty = Decimal(str(int(it["qty"])))
         if subtotal > 0 and line > 0 and qty > 0:
-            landed[id(it)] = (line + delta * line / subtotal) / qty
+            lines[id(it)] = line + delta * line / subtotal
+            landed[id(it)] = lines[id(it)] / qty
         else:
             landed[id(it)] = None
     return {
         "landed": landed,
+        "lines": lines,  # ТЗ 31.10 п.19: сумма строки после скидки/доп. расходов
         "receipt_fields": {
             "discount": disc,
             "discount_percent": pct,
@@ -6386,6 +6400,13 @@ class SupplierReceiptAPIView(CompanyBranchRestrictedMixin, APIView):
                 p.client = supplier
                 p.save(update_fields=["client", "updated_at"])
 
+        # ТЗ 31.10 п.19: сумма строки по накладной без цены → закупка = сумма / количество (4 знака)
+        for it in items:
+            if it.get("line_total") is not None and it.get("purchase_price") is None and int(it["qty"]) > 0:
+                it["purchase_price"] = (Decimal(str(it["line_total"])) / Decimal(int(it["qty"]))).quantize(
+                    Decimal("0.0001"), rounding=ROUND_HALF_UP
+                )
+
         # ТЗ Н-33: скидка и доп. расходы прихода → в закупочную цену строк пропорционально.
         adj = _receipt_discount_extras(request.data, items, by_id)
 
@@ -6406,7 +6427,10 @@ class SupplierReceiptAPIView(CompanyBranchRestrictedMixin, APIView):
         if adj:
             for it in items:
                 if id(it) in adj["landed"] and adj["landed"][id(it)] is not None:
-                    it["purchase_price"] = adj["landed"][id(it)].quantize(Decimal("0.001"), rounding=ROUND_HALF_UP)
+                    it["purchase_price"] = adj["landed"][id(it)].quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)
+                    if adj["lines"].get(id(it)) is not None and it.get("line_total") is not None:
+                        # сумма строки после скидки/доп. расходов — иначе итог прихода разошёлся бы со скидкой
+                        it["line_total"] = adj["lines"][id(it)].quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)
         for it in items:
             pid = it["product"].id
             qty = int(it["qty"])
@@ -6477,6 +6501,7 @@ class SupplierReceiptAPIView(CompanyBranchRestrictedMixin, APIView):
                     product=prod,
                     qty=qty,
                     purchase_price=it.get("purchase_price"),
+                    line_total=it.get("line_total"),  # ТЗ 31.10 п.19
                     landed_price=((adj["landed"].get(id(it)).quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)) if adj and adj["landed"].get(id(it)) is not None else None),
                 )
             )
@@ -6496,6 +6521,7 @@ class SupplierReceiptAPIView(CompanyBranchRestrictedMixin, APIView):
                 ),
                 payment_type=payment_type,
                 created_by=getattr(request, "user", None),
+                amount=it.get("line_total"),  # ТЗ 31.10 п.19: сумма по накладной
             )
 
         if receipt_items:
@@ -6512,6 +6538,10 @@ class SupplierReceiptAPIView(CompanyBranchRestrictedMixin, APIView):
         total_receipt_amount = Decimal("0.00")
         for it in receipt_items:
             pp = it.purchase_price
+            if it.line_total is not None:
+                # ТЗ 31.10 п.19: сумма строки «как в накладной» (12,345 × 100 = 1 234,50, а не 1 235,00)
+                total_receipt_amount += Decimal(str(it.line_total))
+                continue
             if pp is None:
                 pp = it.product.purchase_price or Decimal("0.00")
             total_receipt_amount += Decimal(str(it.qty)) * Decimal(str(pp))
@@ -6629,14 +6659,7 @@ def _receipt_items_only_product(qs, product_id):
 
 class SupplierReceiptQuerysetMixin:
     def _supplier_receipts_base_queryset(self):
-        line_total = ExpressionWrapper(
-            F("items__qty")
-            * Coalesce(
-                F("items__purchase_price"),
-                V(Decimal("0"), output_field=DecimalField(max_digits=11, decimal_places=3)),
-            ),
-            output_field=DecimalField(max_digits=20, decimal_places=3),
-        )
+        line_total = _supplier_receipt_line_total_expr("items__")  # ТЗ 31.10 п.19
         qs = (
             SupplierReceipt.objects.select_related("supplier", "company", "branch", "created_by")
             .prefetch_related(*_RECEIPT_PREFETCH)
