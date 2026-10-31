@@ -1,6 +1,7 @@
 from core.api_compat import may_use_foreign_shift
 from apps.main.services_debt import debt_detached_client as _debt_detached_client  # ТЗ 29.10 Б-13
 from apps.integrations.idempotency import idempotent
+import re
 from decimal import Decimal, ROUND_CEILING, ROUND_HALF_UP, InvalidOperation
 from uuid import UUID, uuid4, uuid5
 
@@ -6675,6 +6676,18 @@ class SupplierReceiptQuerysetMixin:
                     purchased_at__lte=OuterRef("created_at") + timedelta(seconds=60),
                 ).filter(~Exists(later_receipt))
             ))
+
+        # ТЗ 31.10 п.20: ?number= — номер прихода в компании (целое; «ПР-…-000123» тоже понимаем по цифрам в конце),
+        # ?document_number= — номер накладной поставщика (без учёта регистра, по вхождению)
+        num_raw = (qp.get("number") or "").strip()
+        if num_raw:
+            m = re.search(r"(\d+)\s*$", num_raw)
+            if not m:
+                return qs.none()
+            qs = qs.filter(number=int(m.group(1)))
+        doc_raw = (qp.get("document_number") or "").strip()
+        if doc_raw:
+            qs = qs.filter(document_number__icontains=doc_raw)
 
         # ТЗ Н-10: поиск — поставщик (имя/телефон/ООО), товар (название/штрихкод/код); Exists, чтобы не задвоить суммы
         search = (qp.get("search") or "").strip()

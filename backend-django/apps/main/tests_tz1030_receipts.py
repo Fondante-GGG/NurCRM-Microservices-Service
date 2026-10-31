@@ -45,6 +45,16 @@ class ReceiptsTabTests(N33Base):
         self.assertEqual(d["created_by"], str(self.owner.id))
         self.assertRegex(d["created_at"], r"[+-]\d\d:\d\d$|Z$")  # время с часовым поясом
 
+    def test_filter_number_and_document_number(self):
+        # ТЗ 31.10 п.20: ?number= и ?document_number= работают
+        r1 = self.receive([self.a], document_number="НК-77")
+        self.receive([self.b], document_number="АБ-5")
+        ids = lambda url: [x["id"] for x in self.rows(url)]
+        self.assertEqual(ids("/api/main/suppliers/receipts/?number=1"), [r1["id"]])
+        self.assertEqual(ids("/api/main/suppliers/receipts/?number=ПР-2026-000001"), [r1["id"]])
+        self.assertEqual(ids("/api/main/suppliers/receipts/?document_number=НК-7"), [r1["id"]])  # SQLite: регистр кириллицы не сравнивает, в Postgres — да
+        self.assertEqual(ids("/api/main/suppliers/receipts/?number=abc"), [])
+
     def test_bad_document_date_400_nothing_written(self):
         body = {"items": [{"product": str(self.a.id), "qty": 2, "purchase_price": "10.00"}], "document_date": "29.10"}
         r = self.api.post(f"/api/main/suppliers/{self.supplier.id}/receipt/", body, format="json")
