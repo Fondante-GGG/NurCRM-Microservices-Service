@@ -44,3 +44,24 @@ class BonusTz1029Tests(KassaBase):
         self.assertEqual(rows[0]["bonus_used"], "50.00")
         self.assertEqual(rows[0]["bonus_earned"], "30.00")
         self.assertIn("branch_name", rows[0])
+
+
+class BonusUsedOnSaleTests(KassaBase):
+    def test_redeem_by_separate_request_marks_sale(self):
+        # ТЗ 31.10 п.13: чек без бонусов, потом касса списывает бонусы отдельным запросом с sale
+        from apps.main.models import Sale
+        self.client_obj.bonus_balance = Decimal("100.00")
+        self.client_obj.save()
+        r = self.quick(client=str(self.client_obj.id), payment={"method": "cash", "received": "200.00"})
+        self.assertEqual(r.status_code, 201, r.data)
+        sid = r.data["id"]
+        total_before = Sale.objects.get(pk=sid).total
+        b = self.api.post(f"/api/main/clients/{self.client_obj.id}/bonus/",
+                          {"delta": "-25", "reason": "redeem", "sale": sid}, format="json", HTTP_IDEMPOTENCY_KEY="bk-1")
+        self.assertEqual(b.status_code, 201, b.data)
+        # повтор с тем же ключом не удваивает
+        self.api.post(f"/api/main/clients/{self.client_obj.id}/bonus/",
+                      {"delta": "-25", "reason": "redeem", "sale": sid}, format="json", HTTP_IDEMPOTENCY_KEY="bk-1")
+        s = Sale.objects.get(pk=sid)
+        self.assertEqual(s.bonus_redeemed, Decimal("25.00"))
+        self.assertEqual(s.total, total_before)

@@ -14,7 +14,7 @@ from datetime import timedelta
 from decimal import Decimal
 
 from django.db import IntegrityError, transaction
-from django.db.models import DecimalField, OuterRef, Subquery, Sum, Value
+from django.db.models import DecimalField, F, OuterRef, Subquery, Sum, Value
 from django.db.models.functions import Coalesce
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
@@ -1185,6 +1185,10 @@ class ClientBonusAPIView(_ClientScopedMixin, APIView):
         except IntegrityError:
             prior = ClientBonusTransaction.objects.get(company_id=client.company_id, idempotency_key=key)
             return Response({"bonus_balance": str(prior.balance_after), "transaction": _bonus_tx_payload(prior)})
+        if sale is not None and data["reason"] == ClientBonusTransaction.Reason.REDEEM and data["delta"] < 0:
+            # ТЗ 31.10 п.13: касса списывает бонусы отдельным запросом после чека — отмечаем их в чеке
+            # (bonus_used в ответах = bonus_redeemed); итог и скидку чека не трогаем
+            Sale.objects.filter(pk=sale.pk).update(bonus_redeemed=F("bonus_redeemed") - data["delta"])
         return Response(
             {"bonus_balance": str(tx.balance_after), "transaction": _bonus_tx_payload(tx)},
             status=status.HTTP_201_CREATED,
