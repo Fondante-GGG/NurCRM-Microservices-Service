@@ -930,6 +930,25 @@ class OfflineSaleTests(KassaBase):
         self.assertEqual(r.status_code, 400)
         r = self.quick(offline=True, offline_created_at=(timezone.now() - timedelta(days=8)).isoformat())
         self.assertEqual(r.status_code, 400)
+        self.assertEqual(r.data["code"], "offline_too_old")
+
+    def test_offline_late_accepted_with_owner_confirmation(self):
+        # 31.10: старше 7 суток — только accept_late и владелец (или PIN-токен); старше 90 — никогда
+        from django.utils import timezone
+        from datetime import timedelta
+        old = (timezone.now() - timedelta(days=12)).isoformat()
+        r = self.quick(offline=True, offline_created_at=old, accept_late=True)  # self.api — владелец
+        self.assertEqual(r.status_code, 201, r.data)
+        api = APIClient()
+        api.force_authenticate(self.cashier)
+        body = {"offline": True, "offline_created_at": old, "accept_late": True,
+                "items": [{"product": str(self.product.id), "qty": "2", "price": "100.00"}],
+                "payment": {"method": "cash", "received": "500.00"}}
+        r = api.post("/api/main/pos/checkout/", body, format="json", HTTP_IDEMPOTENCY_KEY="late-c1")
+        self.assertEqual(r.status_code, 400)
+        self.assertEqual(r.data["code"], "offline_too_old")
+        r = self.quick(offline=True, offline_created_at=(timezone.now() - timedelta(days=95)).isoformat(), accept_late=True)
+        self.assertEqual(r.status_code, 400)
 
 
 class CatalogSyncTests(KassaBase):

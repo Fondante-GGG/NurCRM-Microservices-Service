@@ -252,6 +252,9 @@ class QuickCheckoutSerializer(serializers.Serializer):
     # BE2-10: продажа, сделанная без связи и досланная позже.
     offline = serializers.BooleanField(required=False, default=False)
     offline_created_at = serializers.DateTimeField(required=False, allow_null=True)
+    # 31.10: офлайн-продажа старше 7 суток — принять, если подтвердил владелец/админ
+    # (вошёл сам или PIN: users/auth/pin/verify/ → заголовок X-Confirm-Token); не старше 90 суток
+    accept_late = serializers.BooleanField(required=False, default=False)
     # ТЗ 30.10 №11: чек из очереди уже состоялся — принять даже при нулевом остатке
     allow_negative_stock = serializers.BooleanField(required=False, default=False)
     # ТЗ ч.12, 2.4: время продажи на кассе. Если смена к моменту отправки закрыта или неизвестна
@@ -286,7 +289,15 @@ class QuickCheckoutSerializer(serializers.Serializer):
             if at > now + OFFLINE_CLOCK_SKEW:
                 raise serializers.ValidationError({"offline_created_at": "Время продажи в будущем."})
             if at < now - OFFLINE_MAX_AGE:
-                raise serializers.ValidationError({"offline_created_at": "Продажа старше 7 суток — оформите её вручную."})
+                if at < now - OFFLINE_LATE_MAX_AGE:
+                    raise serializers.ValidationError({"offline_created_at": "Продажа старше 90 суток — оформите её вручную."})
+                if not (attrs.get("accept_late") and self.context.get("late_confirmed")):
+                    raise ApiError(
+                        "offline_too_old", "Продажа старше 7 суток — оформите её вручную.",
+                        data={"max_days": OFFLINE_MAX_AGE.days, "late_max_days": OFFLINE_LATE_MAX_AGE.days,
+                              "accept_late": "accept_late=true + владелец/админ или X-Confirm-Token (PIN)"},
+                        fields={"offline_created_at": ["Продажа старше 7 суток — оформите её вручную."]},
+                    )
         return attrs
 
 
@@ -379,6 +390,7 @@ def _is_admin_for_discounts(user) -> bool:
 
 
 OFFLINE_MAX_AGE = timedelta(days=7)
+OFFLINE_LATE_MAX_AGE = timedelta(days=90)  # 31.10: с подтверждением владельца (accept_late)
 OFFLINE_CLOCK_SKEW = timedelta(minutes=5)
 
 
@@ -548,7 +560,11 @@ class PosQuickCheckoutAPIView(APIView):
         from apps.main.tz26.pos_sync.services import resolve_origin  # Б-67
         self._origin = resolve_origin(request)
         payload = self._precheck_items(request.data, strict=is_strict(request, company))
-        ser = QuickCheckoutSerializer(data=payload)
+        from apps.users.pin import HEADER as _PIN_HEADER, token_is_valid as _pin_ok
+        _tok = request.META.get(_PIN_HEADER, "")
+        ser = QuickCheckoutSerializer(data=payload, context={
+            "late_confirmed": _is_owner_like(request.user) or bool(_tok and _pin_ok(_tok, request.user)),
+        })
         ser.is_valid(raise_exception=True)
         data = ser.validated_data
         user = request.user
