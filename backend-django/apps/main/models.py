@@ -4677,7 +4677,10 @@ class DealPayment(models.Model):
             self.company_id = self.deal.company_id
             self.branch_id = self.deal.branch_id
 
-        self.full_clean()
+        # ТЗ 31.10 п.5: оплата пачкой (pay-any) создаёт платёж из взноса той же сделки — проверки заведомо
+        # выполнены; full_clean на каждый взнос давал ~15 мс × N
+        if not getattr(self, "_skip_clean", False):
+            self.full_clean()
         super().save(*args, **kwargs)
 
 

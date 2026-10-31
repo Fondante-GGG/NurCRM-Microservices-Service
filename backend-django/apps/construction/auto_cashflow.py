@@ -404,13 +404,16 @@ def create_auto_cashflow(
         if user:
             ctx["user"] = user
 
-        cashbox = resolve_cashbox(
-            company=company,
-            context=ctx,
-            source_kind=source_kind,
-            amount=amount_dec,
-            require_cashbox=True,
-        )
+        from apps.construction.batch_cache import memo, ref
+        _key = ("cashbox", ref(company), source_kind, amount_dec > 0 if amount_dec is not None else None,
+                tuple(sorted((k, ref(v)) for k, v in ctx.items())))
+        cashbox = memo(_key, lambda: resolve_cashbox(
+                company=company,
+                context=ctx,
+                source_kind=source_kind,
+                amount=amount_dec,
+                require_cashbox=True,
+            ))
 
     actual_branch = branch or (cashbox.branch if cashbox else None)
 

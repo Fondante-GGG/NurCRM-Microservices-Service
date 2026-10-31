@@ -55,6 +55,11 @@ def get_default_category(company, code):
 
 
 def category_for_source(company, source_kind):
+    from apps.construction.batch_cache import memo, ref
+    return memo(("category", ref(company), source_kind), lambda: _category_for_source(company, source_kind))
+
+
+def _category_for_source(company, source_kind):
     code = SOURCE_KIND_CODE.get(source_kind)
     if not code:
         return None

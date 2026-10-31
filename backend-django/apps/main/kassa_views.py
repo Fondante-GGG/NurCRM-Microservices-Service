@@ -1531,6 +1531,7 @@ class ClientPayDebtAPIView(APIView):
             payload["cashbox_id"] = str(data["cashbox"])
 
         view = ClientDealsPayAnyAPIView()
+        view.skip_deals_payload = True  # ТЗ 31.10 п.5: ответу кассы список сделок не нужен
         view.request = request
         view.args, view.kwargs = (), {"client_id": pk}
         view.format_kwarg = None
@@ -1548,9 +1549,14 @@ class ClientPayDebtAPIView(APIView):
                     d_[1] += p_.amount
                 pairs = [(d, a) for d, a in merged.values()]
             applied = []
+            # ТЗ 31.10 п.5: свежие сделки одним запросом, а не по одной на взнос
+            fresh_by_id = {
+                d.pk: d for d in ClientDeal.objects.select_related("sale").prefetch_related("installments")
+                .filter(pk__in={d.pk for d, _ in pairs})
+            }
             for deal, amount in pairs:
                 # остаток долга по этой продаже после платежа и номер чека (ТЗ 29.10 Б-13 п.3)
-                fresh = ClientDeal.objects.select_related("sale").prefetch_related("installments").get(pk=deal.pk)
+                fresh = fresh_by_id[deal.pk]
                 applied.append({
                     "sale": str(deal.sale_id) if deal.sale_id else None,
                     "deal": str(deal.id),

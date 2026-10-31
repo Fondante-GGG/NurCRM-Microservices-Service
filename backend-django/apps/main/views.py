@@ -4493,6 +4493,16 @@ class ClientDealsPayAnyAPIView(APIView, CompanyBranchRestrictedMixin):
         return resp
 
     def pay(self, request, client_id, raw_data):
+        # ТЗ 31.10 п.5: одна пачка — касса/статья/получатели уведомлений ищутся один раз на все взносы
+        from apps.construction.batch_cache import batch_cache
+        with batch_cache():
+            return self._pay(request, client_id, raw_data)
+
+    def _deals_payload(self, request, deals):
+        # ТЗ 31.10 п.5: касса (clients/{id}/pay-debt/) список сделок не читает — не собираем его
+        return [] if getattr(self, "skip_deals_payload", False) else self._serialize_deals(request, deals)
+
+    def _pay(self, request, client_id, raw_data):
         """Распределяет оплату; распределение по сделкам кладёт в self.applied [(deal, amount)]."""
         self.applied = []
         self.payments_made = []  # ТЗ Н-11/Н-13: созданные DealPayment (pay-supplier-debt, received_by)
@@ -4544,7 +4554,7 @@ class ClientDealsPayAnyAPIView(APIView, CompanyBranchRestrictedMixin):
                 source_id__in=[str(p.id) for p in self.replay_payments],
             ).order_by("created_at"))
             self.replayed = True  # ТЗ 29.10 Б-13: повтор отвечаем без проверки смены (она могла закрыться)
-            return Response({"paid_total": str(prior_operation.amount), "deals": self._serialize_deals(request, ordered)})
+            return Response({"paid_total": str(prior_operation.amount), "deals": self._deals_payload(request, ordered)})
 
         bad = self._validate_cashbox_and_shift(request, data)
         if bad is not None:
@@ -4614,6 +4624,7 @@ class ClientDealsPayAnyAPIView(APIView, CompanyBranchRestrictedMixin):
         note = data.get("note", "") or ""
         left = amount
         affected_ids = []
+        changed_installments = []
         is_supplier = client.type == Client.StatusClient.SUPPLIERS
         for inst in installments:
             if left <= 0:
@@ -4622,7 +4633,7 @@ class ClientDealsPayAnyAPIView(APIView, CompanyBranchRestrictedMixin):
             if pay_amount <= 0:
                 continue
             deal = inst.deal
-            payment = DealPayment.objects.create(
+            payment = DealPayment(
                 company=deal.company,
                 branch=deal.branch,
                 deal=deal,
@@ -4635,10 +4646,12 @@ class ClientDealsPayAnyAPIView(APIView, CompanyBranchRestrictedMixin):
                 note=note,
                 payment_method=pm,
             )
+            payment._skip_clean = True  # ТЗ 31.10 п.5: взнос и сделка заведомо согласованы
+            payment.save(force_insert=True)
             new_paid = (inst.paid_amount + pay_amount).quantize(Decimal("0.01"))
             inst.paid_amount = min(new_paid, inst.amount)
             inst.paid_on = paid_date if inst.paid_amount >= inst.amount else None
-            inst.save(update_fields=["paid_amount", "paid_on"])
+            changed_installments.append(inst)  # ТЗ 31.10 п.5: сохраняем одним запросом после цикла
 
             if is_supplier:
                 # Долг поставщику - это РАСХОД (как в clients/{id}/deals/{deal}/pay/).
@@ -4689,6 +4702,8 @@ class ClientDealsPayAnyAPIView(APIView, CompanyBranchRestrictedMixin):
             self.payments_made.append(payment)
             left = (left - pay_amount).quantize(Decimal("0.01"))
 
+        if changed_installments:
+            DealInstallment.objects.bulk_update(changed_installments, ["paid_amount", "paid_on"])
         fresh_deals = list(
             ClientDeal.objects.filter(id__in=affected_ids)
             .select_related("client")
@@ -4698,7 +4713,7 @@ class ClientDealsPayAnyAPIView(APIView, CompanyBranchRestrictedMixin):
         ordered = [by_id[deal_id] for deal_id in affected_ids]
         operation.affected_deal_ids = [str(deal_id) for deal_id in affected_ids]
         operation.save(update_fields=["affected_deal_ids"])
-        return Response({"paid_total": str(amount), "deals": self._serialize_deals(request, ordered)})
+        return Response({"paid_total": str(amount), "deals": self._deals_payload(request, ordered)})
 
 
 @read_only_guard("can_edit_clients")
