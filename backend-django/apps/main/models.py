@@ -2001,7 +2001,8 @@ class Cart(models.Model):
         if self.shift_id:
             if self.company_id and self.shift.company_id != self.company_id:
                 raise ValidationError({"shift": "Смена другой компании."})
-            if self.branch_id is not None and (self.shift.branch_id or None) != (self.branch_id or None):
+            _sb = self.shift.branch_id or getattr(self.shift.cashbox, "branch_id", None)  # ТЗ 31.10 п.13
+            if self.branch_id is not None and _sb is not None and _sb != self.branch_id:
                 raise ValidationError({"shift": "Смена другого филиала."})
 
     # Поля, которые пишет recalc(): это вычисляемые суммы, они не участвуют
@@ -2553,7 +2554,9 @@ class Sale(models.Model):
         if self.shift_id:
             if self.company_id and self.shift.company_id != self.company_id:
                 raise ValidationError({"shift": "Смена другой компании."})
-            if (self.branch_id or None) != (self.shift.branch_id or None):
+            # ТЗ 31.10 п.13: у смены без филиала (общая касса) чек может иметь филиал кассира
+            _sb = self.shift.branch_id or getattr(self.shift.cashbox, "branch_id", None)
+            if _sb is not None and (self.branch_id or None) != _sb:
                 raise ValidationError({"shift": "Смена другого филиала."})
             if self.cashbox_id and self.cashbox_id != self.shift.cashbox_id:
                 raise ValidationError({"cashbox": "Касса продажи должна совпадать с кассой смены."})
@@ -2577,8 +2580,11 @@ class Sale(models.Model):
             if self.company_id != self.shift.company_id:
                 self.company_id = self.shift.company_id
                 touched.add("company")
-            if (self.branch_id or None) != (self.shift.branch_id or None):
-                self.branch_id = self.shift.branch_id
+            # ТЗ 31.10 п.13: если у смены нет филиала — берём филиал её кассы, а если и там нет,
+            # оставляем уже выбранный (раньше затирали в NULL, и у чеков пропадал branch)
+            _shift_branch_id = self.shift.branch_id or getattr(self.shift.cashbox, "branch_id", None)
+            if _shift_branch_id is not None and (self.branch_id or None) != _shift_branch_id:
+                self.branch_id = _shift_branch_id
                 touched.add("branch")
             if self.cashbox_id != self.shift.cashbox_id:
                 self.cashbox_id = self.shift.cashbox_id  # ← важно: всегда, не только если пусто
@@ -7101,6 +7107,9 @@ class MarketStockTransfer(models.Model):
     )
     note = models.CharField(max_length=255, blank=True, default="")
     idempotency_key = models.CharField(max_length=128, null=True, blank=True)
+    # ТЗ 31.10 п.22: номер документа и файлы (накладная, фото, Excel)
+    document_number = models.CharField(max_length=64, blank=True, default="")
+    attachments = models.ManyToManyField("main.MainMedia", blank=True, related_name="market_stock_transfers")
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name="+"
     )

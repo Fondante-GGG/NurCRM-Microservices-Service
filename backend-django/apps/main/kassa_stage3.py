@@ -265,6 +265,7 @@ class StockTransferSerializer(serializers.Serializer):
     to_warehouse = serializers.UUIDField(required=False, allow_null=True, source="to_id")
     items = TransferItemSerializer(many=True, allow_empty=False)
     note = serializers.CharField(required=False, allow_blank=True, max_length=255)
+    document_number = serializers.CharField(required=False, allow_blank=True, max_length=64)  # ТЗ 31.10 п.22
 
     def to_internal_value(self, data):
         # принимаем и короткие ключи из BACKEND_API.md: {from, to, items}
@@ -276,12 +277,20 @@ class StockTransferSerializer(serializers.Serializer):
         return super().to_internal_value(data)
 
 
+def transfer_attachments_payload(t, request=None):
+    """Файлы перемещения (ТЗ 31.10 п.22): id, url, size, content_type, sha256, created_at, document_type."""
+    from apps.main.media_receipts import media_payload
+    return [dict(media_payload(m, request), document_type=m.purpose) for m in t.attachments.all()]
+
+
 def _transfer_payload(t):
     return {
         "id": str(t.id),
         "from_warehouse": str(t.from_warehouse_id) if t.from_warehouse_id else None,
         "to_warehouse": str(t.to_warehouse_id) if t.to_warehouse_id else None,
         "note": t.note,
+        "document_number": t.document_number,  # ТЗ 31.10 п.22
+        "attachments": transfer_attachments_payload(t),
         "items": [
             {"product": str(i.product_id), "variant": str(i.variant_id) if i.variant_id else None, "qty": str(qty3(i.quantity))}
             for i in t.items.all()
@@ -329,7 +338,7 @@ class StockTransferListCreateAPIView(APIView):
 
     def get(self, request):
         company = _company(request)
-        rows = MarketStockTransfer.objects.filter(company=company).prefetch_related("items")[:200]
+        rows = MarketStockTransfer.objects.filter(company=company).prefetch_related("items", "attachments")[:200]
         return Response([_transfer_payload(t) for t in rows])
 
     def post(self, request):
@@ -354,6 +363,7 @@ class StockTransferListCreateAPIView(APIView):
                 t = MarketStockTransfer.objects.create(
                     company=company, from_warehouse=src, to_warehouse=dst,
                     note=data.get("note") or "", idempotency_key=key, created_by=request.user,
+                    document_number=data.get("document_number") or "",
                 )
                 for idx, it in enumerate(data["items"]):
                     qty = qty3(it["qty"])

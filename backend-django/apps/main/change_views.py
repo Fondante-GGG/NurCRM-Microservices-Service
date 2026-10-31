@@ -11,6 +11,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.main.change_feed import RETENTION_DAYS, feed_type, serialize_event
+from apps.main.event_names import feed_types_for
 from apps.main.models import ChangeEvent
 from apps.main.price_check import _etag_matches
 from core.http_cache import ETagMixin
@@ -53,7 +54,11 @@ class ChangesFeedView(ETagMixin, CompanyBranchRestrictedMixin, APIView):
             limit = max(1, min(int(qp.get("limit") or 500), MAX_LIMIT))
         except ValueError:
             limit = 500
-        types = [feed_type(t.strip()) for t in (qp.get("types") or "").split(",") if t.strip()]
+        types = []
+        for t in (qp.get("types") or "").split(","):
+            if t.strip():
+                # ТЗ 31.10 п.14: принимаем и старые имена ленты, и единые (price_changed, sale_created, ...)
+                types += [feed_type(x) for x in feed_types_for(feed_type(t.strip()))]
 
         qs = ChangeEvent.objects.filter(company_id=company.id)
         branch_id = self._fixed_branch_id(company)

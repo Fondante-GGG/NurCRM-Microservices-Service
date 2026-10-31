@@ -48,7 +48,9 @@ from apps.main.showcase.size_charts import SizeChartListCreateAPIView, SizeChart
 from apps.main.supplier_receipt_pdf import SupplierReceiptPdfAPIView
 from apps.main.media_receipts import MainMediaListCreateAPIView, MainMediaDetailAPIView, SalePublicLinkAPIView
 from apps.main.receipt_share import SaleShareLinkAPIView
+from apps.main.sale_items_api import SaleItemsBatchAPIView
 from apps.main.receipt_files import SupplierReceiptFileAPIView
+from apps.main.transfer_files import StockTransferDetailAPIView, StockTransferFileAPIView  # ТЗ 31.10 п.22
 from apps.main.showcase.views_public import PublicCompanyShowcaseFacetsAPIView, PublicCompanyProductDetailAPIView, PublicCompanyAPIView, PublicCompanyShowcaseAPIView
 from apps.main.recommendations import (
     RecommendationEventsAPIView,
@@ -412,6 +414,7 @@ urlpatterns = [
         name="client-subscription-schedule",
     ),
     
+    path("pos/sales/items/", SaleItemsBatchAPIView.as_view(), name="pos-sale-items-batch"),  # ТЗ 31.10 п.11
     path("pos/sales/", SaleListAPIView.as_view(), name="pos-sale-list"),
     path("pos/checkout/batch/", PosCheckoutBatchAPIView.as_view(), name="pos-checkout-batch"),
     path("pos/checkout/", PosQuickCheckoutAPIView.as_view(), name="pos-quick-checkout"),
@@ -425,6 +428,14 @@ urlpatterns = [
     path("products/<uuid:pk>/variants/<uuid:vid>/", ProductVariantDetailAPIView.as_view(), name="product-variant-detail"),
     path("products/<uuid:pk>/stocks/", ProductStocksAPIView.as_view(), name="product-stocks"),
     path("stock-transfers/", StockTransferListCreateAPIView.as_view(), name="stock-transfers"),
+    # ТЗ 31.10 п.22: карточка и документы перемещения (и под адресом stock/transfers/)
+    path("stock/transfers/", StockTransferListCreateAPIView.as_view(), name="stock-transfers-alias"),
+    path("stock/transfers/<uuid:pk>/", StockTransferDetailAPIView.as_view(), name="stock-transfer-detail"),
+    path("stock/transfers/<uuid:pk>/file/", StockTransferFileAPIView.as_view(), name="stock-transfer-file"),
+    path("stock/transfers/<uuid:pk>/file/<uuid:media_id>/", StockTransferFileAPIView.as_view(), name="stock-transfer-file-delete"),
+    path("stock-transfers/<uuid:pk>/", StockTransferDetailAPIView.as_view(), name="stock-transfer-detail-alias"),
+    path("stock-transfers/<uuid:pk>/file/", StockTransferFileAPIView.as_view(), name="stock-transfer-file-alias"),
+    path("stock-transfers/<uuid:pk>/file/<uuid:media_id>/", StockTransferFileAPIView.as_view(), name="stock-transfer-file-delete-alias"),
     path("branch-transfers/", BranchTransferListCreateAPIView.as_view(), name="branch-transfers-list-create"),
     path("branch-transfers/<uuid:pk>/", BranchTransferDetailAPIView.as_view(), name="branch-transfers-detail"),
     path("branch-transfers/<uuid:pk>/cancel/", BranchTransferCancelAPIView.as_view(), name="branch-transfers-cancel"),

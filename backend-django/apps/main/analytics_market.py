@@ -38,6 +38,7 @@ from rest_framework.exceptions import PermissionDenied, ValidationError
 from apps.users.models import Branch
 from apps.construction.models import CashShift
 
+from apps.main.revenue import revenue_definition, revenue_total  # ТЗ 31.10 п.11
 from apps.main.cache_utils import cache_market_analytics_key  # путь поправь под свой проект
 
 
@@ -852,6 +853,19 @@ class AnalyticsView(APIView):
         qp = getattr(request, "query_params", None) or getattr(request, "GET", {})
         return (qp.get("include_global") or "").strip() in ("1", "true", "yes", "on")
 
+    def _unified_revenue_sales(self, request, company, branch, period, Sale):
+        """ТЗ 31.10 п.11: чеки по единому определению выручки (apps.main.revenue) с теми же фильтрами."""
+        from apps.main.revenue import revenue_sales_qs
+
+        qs = Sale.objects.filter(company=company)
+        if branch is not None and _model_has_field(Sale, "branch"):
+            if self._include_global(request):
+                qs = qs.filter(Q(branch=branch) | Q(branch__isnull=True))
+            else:
+                qs = qs.filter(branch=branch)
+        qs = self._apply_sale_filters(request, qs, Sale)
+        return revenue_sales_qs(Sale, qs, period)
+
     def _apply_sale_filters(self, request, qs, SaleModel):
         cashbox_id = request.query_params.get("cashbox")
         if cashbox_id and _model_has_field(SaleModel, "cashbox"):
@@ -1099,15 +1113,9 @@ class AnalyticsView(APIView):
 
         Sale, SaleItem = get_sale_models()
         ProductModel = apps.get_model("main.Product")
-        qs = Sale.objects.filter(company=company)
-        if branch is not None:
-            if self._include_global(request):
-                qs = qs.filter(Q(branch=branch) | Q(branch__isnull=True))
-            else:
-                qs = qs.filter(branch=branch)
-        qs = qs.filter(status__in=(Sale.Status.PAID, Sale.Status.PARTIALLY_RETURNED))
-        qs = qs.filter(paid_at__gte=period.start, paid_at__lt=period.end)
-        qs = self._apply_sale_filters(request, qs, Sale)
+        # ТЗ 31.10 п.11: набор чеков — по единому определению выручки (вместе с чеками в долг)
+        qs = self._unified_revenue_sales(request, company, branch, period, Sale)
+        receipts_total = revenue_total(qs)
 
         key_field, name_field = self.ABC_GROUPS[by]
         items_qs = SaleItem.objects.filter(sale__in=qs)
@@ -1170,7 +1178,14 @@ class AnalyticsView(APIView):
                 "revenue": str(_money(sum((m["revenue"] for m in items), Decimal("0")))),
                 "qty": str(sum((m["qty"] for m in items), Decimal("0")).quantize(Decimal("0.001"))),
                 "profit": str(_money(sum((m["profit"] for m in items), Decimal("0")))),
+                # ТЗ 31.10 п.11: сумма чеков по единому определению (совпадает с «Прибылью и убытками»)
+                "receipts_revenue": str(_money(receipts_total)),
             },
+            "definition": revenue_definition(
+                note="Выручка строк = qty x цена - скидка строки; скидка на весь чек между строками не делится, "
+                     "поэтому сумма строк может быть больше receipts_revenue (суммы чеков).",
+                line_based=True,
+            ),
             "items": out,
         }
 
@@ -1544,6 +1559,12 @@ class AnalyticsView(APIView):
                 "amount": str(_money(credit_sales_total)),
             })
 
+        # ТЗ 31.10 п.11: единая выручка (оплаченные + чеки в долг целиком). При фильтре по категории
+        # чек не делится по строкам — отдаём revenue.
+        sales_total = revenue
+        if Sale is not None and cat_ids is None:
+            sales_total = revenue_total(self._unified_revenue_sales(request, company, branch, period, Sale))
+
         avg_check = _safe_div(_money(revenue), tx)
 
         documents = [
@@ -1563,7 +1584,14 @@ class AnalyticsView(APIView):
                 "categories": (request.query_params.get("categories") or "").strip() or None,
                 "include_children": (request.query_params.get("include_children") or "").strip().lower() in ("1", "true", "yes", "on"),
             },
+            "definition": revenue_definition(
+                note="cards.revenue в «Продажах» — деньги по чекам: оплаченные плюс предоплаты по чекам в долг "
+                     "(долговая часть отдельно в credit_sales_total). cards.sales_total — единая выручка: "
+                     "суммы всех чеков, включая долговые целиком.",
+                revenue_field="sales_total",
+            ),
             "cards": {
+                "sales_total": str(_money(sales_total)),  # ТЗ 31.10 п.11
                 "revenue": str(_money(revenue)),
                 "gross_revenue": str(_money(revenue)),
                 "revenue_before_returns": str(_money(Decimal(revenue) + Decimal(partial_returns_amount))),
@@ -4580,17 +4608,8 @@ class AnalyticsView(APIView):
         paid_val = _choice_value(Sale, "Status", "PAID", "paid")
         partial_ret_val = _choice_value(Sale, "Status", "PARTIALLY_RETURNED", "partially_returned")
 
-        sales_qs = Sale.objects.filter(
-            company=company,
-            status__in=(paid_val, partial_ret_val),
-            **{f"{dt_field}__gte": period.start, f"{dt_field}__lt": period.end},
-        )
-        if branch is not None and _model_has_field(Sale, "branch"):
-            if self._include_global(request):
-                sales_qs = sales_qs.filter(Q(branch=branch) | Q(branch__isnull=True))
-            else:
-                sales_qs = sales_qs.filter(branch=branch)
-        sales_qs = self._apply_sale_filters(request, sales_qs, Sale)
+        # ТЗ 31.10 п.11: выручка по единому определению (оплаченные + чеки в долг, без отменённых)
+        sales_qs = self._unified_revenue_sales(request, company, branch, period, Sale)
 
         revenue = sales_qs.aggregate(
             s=Coalesce(Sum("total"), Value(Z_MONEY, output_field=MONEY_FIELD), output_field=MONEY_FIELD)
@@ -4666,6 +4685,7 @@ class AnalyticsView(APIView):
                 "date_to": (period.end - timedelta(seconds=1)).strftime("%Y-%m-%d"),
             },
             "revenue": str(_money(revenue)),
+            "definition": revenue_definition(),  # ТЗ 31.10 п.11
             "cogs": str(_money(cogs)),
             "gross_profit": str(gross_profit),
             "margin_percent": margin_pct,
