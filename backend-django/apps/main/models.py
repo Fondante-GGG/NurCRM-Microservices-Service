@@ -7098,6 +7098,9 @@ class MarketStockTransfer(models.Model):
     )
     note = models.CharField(max_length=255, blank=True, default="")
     idempotency_key = models.CharField(max_length=128, null=True, blank=True)
+    # ТЗ 31.10 п.22: номер документа и файлы (накладная, фото, Excel)
+    document_number = models.CharField(max_length=64, blank=True, default="")
+    attachments = models.ManyToManyField("main.MainMedia", blank=True, related_name="market_stock_transfers")
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name="+"
     )
