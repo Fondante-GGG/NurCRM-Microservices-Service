@@ -316,6 +316,27 @@ def _check_phone_digits(value, current=None):
     return value
 
 
+def _purchase_edit_effective(user):
+    """ТЗ редактор накладных 30.10: право «Редактор документов закупок» — владелец всегда, остальные только явное True."""
+    from apps.users.permissions import can_edit_purchase_documents
+
+    return can_edit_purchase_documents(user)
+
+
+def _check_purchase_edit_grant(data, instance, current_user):
+    """Право «Редактор документов закупок» выдаёт/снимает только владелец (сравниваем действующее значение)."""
+    from apps.warehouse.op_permissions import is_company_owner
+
+    key = "can_edit_purchase_documents"
+    if key not in data or current_user is None:
+        return
+    before = _purchase_edit_effective(instance) if instance is not None else False
+    if bool(data[key]) != before and not is_company_owner(current_user):
+        raise serializers.ValidationError({key: "Это право может выдать только владелец компании."})
+    if data[key] is False:
+        data[key] = None  # «нет» хранится как NULL (по умолчанию нет)
+
+
 class EmployeeFieldsMixin:
     """Общая валидация полей сотрудника (создание и PATCH)."""
 
@@ -500,6 +521,7 @@ class UserSerializer(serializers.ModelSerializer):
         ]
         if sent and current_user is not None and not is_company_owner(current_user):
             raise serializers.ValidationError({sent[0]: "Это право может выдать только владелец компании."})
+        _check_purchase_edit_grant(data, self.instance, current_user)  # ТЗ редактор накладных 30.10
 
         return data
 
@@ -514,6 +536,7 @@ class UserSerializer(serializers.ModelSerializer):
 
     def to_representation(self, instance):
         rep = super().to_representation(instance)
+        rep["can_edit_purchase_documents"] = _purchase_edit_effective(instance)  # ТЗ редактор накладных 30.10
         return _apply_cashier_sector_gate(rep, instance)
 
 
@@ -853,6 +876,7 @@ class EmployeeCreateSerializer(EmployeeFieldsMixin, serializers.ModelSerializer)
 
     def to_representation(self, instance):
         rep = super().to_representation(instance)
+        rep["can_edit_purchase_documents"] = _purchase_edit_effective(instance)  # ТЗ редактор накладных 30.10
         rep["generated_password"] = getattr(self, "_generated_password", None)
         rep["consulting_region_codes"] = instance.get_consulting_region_codes()
         rep["consulting_regions"] = _get_user_consulting_regions(instance)
@@ -937,6 +961,7 @@ class EmployeeUpdateSerializer(EmployeeFieldsMixin, serializers.ModelSerializer)
             "can_create_funnel",
             "can_manage_lead_ad_spend",
             *READ_ONLY_FIELDS,
+            "can_edit_purchase_documents",  # ТЗ редактор накладных 30.10
             "funnel_grants",
             "branch_ids",
             *EMPLOYEE_CARD_FIELDS,  # ТЗ 29.10 Б-101
@@ -973,6 +998,8 @@ class EmployeeUpdateSerializer(EmployeeFieldsMixin, serializers.ModelSerializer)
                 new_codes = [str(x).strip().lower() for x in data["consulting_region_codes"]]
                 if not set(new_codes).issubset(set(my_regions)):
                     raise serializers.ValidationError("Нельзя привязать сотрудника к чужому региону.")
+
+        _check_purchase_edit_grant(data, target_user, current_user)  # ТЗ редактор накладных 30.10
 
         branch_ids = data.get("branch_ids", None)
         if branch_ids is not None:
@@ -1032,6 +1059,7 @@ class EmployeeUpdateSerializer(EmployeeFieldsMixin, serializers.ModelSerializer)
 
     def to_representation(self, instance):
         rep = super().to_representation(instance)
+        rep["can_edit_purchase_documents"] = _purchase_edit_effective(instance)  # ТЗ редактор накладных 30.10
         rep["consulting_region_codes"] = instance.get_consulting_region_codes()
         rep["consulting_regions"] = _get_user_consulting_regions(instance)
         return rep
@@ -1086,12 +1114,14 @@ class UserListSerializer(serializers.ModelSerializer):
             *[f.name for f in User._meta.fields if f.name.startswith("can_view_")],
             "can_manage_funnel_leads", "can_manage_funnel_stages", "can_create_funnel", "can_manage_lead_ad_spend",
             *READ_ONLY_FIELDS,
+            "can_edit_purchase_documents",  # ТЗ редактор накладных 30.10
             "branch_ids", "primary_branch_id",
             *EMPLOYEE_CARD_FIELDS,  # ТЗ 29.10 Б-101
         ]
 
     def to_representation(self, instance):
         rep = super().to_representation(instance)
+        rep["can_edit_purchase_documents"] = _purchase_edit_effective(instance)  # ТЗ редактор накладных 30.10
         return _apply_cashier_sector_gate(rep, instance)
 
 
@@ -1117,11 +1147,13 @@ class UserWithPermissionsSerializer(serializers.ModelSerializer):
             *[f.name for f in User._meta.fields if f.name.startswith("can_view_")],
             "can_manage_funnel_leads", "can_manage_funnel_stages", "can_create_funnel", "can_manage_lead_ad_spend",
             *READ_ONLY_FIELDS,
+            "can_edit_purchase_documents",  # ТЗ редактор накладных 30.10
             "branch_ids", "primary_branch_id",
         ]
 
     def to_representation(self, instance):
         rep = super().to_representation(instance)
+        rep["can_edit_purchase_documents"] = _purchase_edit_effective(instance)  # ТЗ редактор накладных 30.10
         return _apply_cashier_sector_gate(rep, instance)
 
 
@@ -1270,8 +1302,10 @@ class CompanySerializer(serializers.ModelSerializer):
             "appointment_work_start",
             "appointment_work_end",
             "market_sphere",
+            "receipt_edit_window",  # ТЗ редактор накладных 30.10
         ]
-        extra_kwargs = {"cashier_password": {"write_only": True}, "finance_closed_until": {"read_only": True}}
+        extra_kwargs = {"cashier_password": {"write_only": True}, "finance_closed_until": {"read_only": True},
+                        "receipt_edit_window": {"read_only": True}}
 
     def validate_inn(self, value):
         # QA B24: ИНН компании — как у контрагента: пусто или 14 цифр.
@@ -1331,6 +1365,12 @@ class CompanySerializer(serializers.ModelSerializer):
         # ТЗ ч.12, 2.8: откроется ли редактор витрины (то же условие, что у 403 в showcase/*),
         # чтобы программа заранее показывала «подключите услугу», а не ошибку.
         data["can_edit_showcase"] = bool(getattr(instance, "can_view_showcase", False))
+        # ТЗ редактор накладных 30.10: окно правки приходов (действующее значение) и может ли его менять этот пользователь
+        from apps.main.receipt_edit import receipt_edit_window
+        from apps.warehouse.op_permissions import is_company_owner
+
+        data["receipt_edit_window"] = receipt_edit_window(instance)
+        data["receipt_edit_window_editable"] = bool(user is not None and is_company_owner(user))
 
         return data
 
@@ -1440,7 +1480,27 @@ class CompanyUpdateSerializer(serializers.ModelSerializer):
             "finance_closed_until",  # ТЗ 29.10 Б-100
             "market_sphere",
             "market_spheres",
+            "receipt_edit_window",  # ТЗ редактор накладных 30.10: менять может только владелец
         ]
+
+    def validate_receipt_edit_window(self, value):
+        from apps.main.receipt_edit import EDIT_WINDOWS
+        from apps.warehouse.op_permissions import is_company_owner
+        from core.exceptions import ApiError
+
+        from apps.main.receipt_edit import receipt_edit_window
+
+        request = self.context.get("request")
+        user = getattr(request, "user", None) if request else None
+        value = str(value or "").strip().lower()
+        if self.instance is not None and value == receipt_edit_window(self.instance):
+            return value  # форму прислали целиком без изменения окна — не мешаем админу сохранить остальное
+        if not is_company_owner(user):
+            raise ApiError("permission_denied", "Окно правки приходов меняет только владелец.", status_code=403,
+                           data={"required": "owner"})
+        if value not in EDIT_WINDOWS:
+            raise serializers.ValidationError("Допустимо: 24h, 48h, always.")
+        return value
 
     def validate_market_spheres(self, value):
         if not isinstance(value, list):

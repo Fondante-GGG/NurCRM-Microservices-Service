@@ -34,6 +34,7 @@ NEW_EVENT_TYPES = (
     "supplier_debt_changed",
     "features_changed",
     "pos_request_changed",
+    "receipt_changed",  # ТЗ редактор накладных 30.10
 )
 
 RETENTION_DAYS = 7

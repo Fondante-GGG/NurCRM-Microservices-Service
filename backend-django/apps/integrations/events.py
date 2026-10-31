@@ -42,6 +42,7 @@ EVENTS = (
     "supplier_debt_changed",
     "features_changed",
     "pos_request_changed",
+    "receipt_changed",  # ТЗ редактор накладных 30.10
     # ТЗ 26.10 (Б-62, Б-69, Б-72, Б-60)
     "task.assigned",
     "task.reminder",

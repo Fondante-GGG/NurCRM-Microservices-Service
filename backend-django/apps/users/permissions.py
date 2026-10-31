@@ -191,3 +191,20 @@ def read_only_guard(field: str):
         return view_cls
 
     return deco
+
+
+# ─────────────────────────────────────────────────────────────
+# ТЗ редактор накладных 30.10: «Редактор документов закупок»
+# ─────────────────────────────────────────────────────────────
+PURCHASE_EDIT_FIELD = "can_edit_purchase_documents"
+
+
+def can_edit_purchase_documents(user) -> bool:
+    """Владелец компании — всегда да; остальные (и админ) — только явно выданное владельцем True."""
+    if user is None or not getattr(user, "is_authenticated", False):
+        return False
+    from apps.warehouse.op_permissions import is_company_owner
+
+    if is_company_owner(user):
+        return True
+    return getattr(user, PURCHASE_EDIT_FIELD, None) is True

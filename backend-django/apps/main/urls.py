@@ -50,6 +50,12 @@ from apps.main.media_receipts import MainMediaListCreateAPIView, MainMediaDetail
 from apps.main.receipt_share import SaleShareLinkAPIView
 from apps.main.sale_items_api import SaleItemsBatchAPIView
 from apps.main.receipt_files import SupplierReceiptFileAPIView
+from apps.main.receipt_edit_views import (  # ТЗ редактор накладных 30.10
+    SupplierReceiptChangesAPIView,
+    SupplierReceiptRevertAPIView,
+    SupplierReceiptVersionDetailAPIView,
+    SupplierReceiptVersionsAPIView,
+)
 from apps.main.transfer_files import StockTransferDetailAPIView, StockTransferFileAPIView  # ТЗ 31.10 п.22
 from apps.main.showcase.views_public import PublicCompanyShowcaseFacetsAPIView, PublicCompanyProductDetailAPIView, PublicCompanyAPIView, PublicCompanyShowcaseAPIView
 from apps.main.recommendations import (
@@ -518,6 +524,11 @@ urlpatterns = [
     path("purchase-orders/<uuid:pk>/", PurchaseOrderDetailAPIView.as_view(), name="purchase-order-detail"),
     path("suppliers/", SupplierListAPIView.as_view(), name="supplier-list"),
     path("suppliers/receipts/", SupplierReceiptListAPIView.as_view(), name="supplier-receipts"),
+    # ТЗ редактор накладных 30.10: лента правок, версии и откат прихода
+    path("suppliers/receipts/changes/", SupplierReceiptChangesAPIView.as_view(), name="supplier-receipt-changes"),
+    path("suppliers/receipts/<uuid:pk>/versions/", SupplierReceiptVersionsAPIView.as_view(), name="supplier-receipt-versions"),
+    path("suppliers/receipts/<uuid:pk>/versions/<int:n>/", SupplierReceiptVersionDetailAPIView.as_view(), name="supplier-receipt-version"),
+    path("suppliers/receipts/<uuid:pk>/revert/", SupplierReceiptRevertAPIView.as_view(), name="supplier-receipt-revert"),
     path("suppliers/receipts/<uuid:pk>/pdf/", SupplierReceiptPdfAPIView.as_view(), name="supplier-receipt-pdf"),  # ТЗ Н-33
     path("suppliers/receipts/<uuid:pk>/file/", SupplierReceiptFileAPIView.as_view(), name="supplier-receipt-file"),  # ТЗ 30.10
     path("suppliers/receipts/<uuid:pk>/file/<uuid:media_id>/", SupplierReceiptFileAPIView.as_view(), name="supplier-receipt-file-delete"),

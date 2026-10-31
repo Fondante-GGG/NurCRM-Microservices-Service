@@ -25,6 +25,7 @@ BONUS_CHANGED = "bonus_changed"
 DEBT_CHANGED = "debt_changed"
 SUPPLIER_DEBT_CHANGED = "supplier_debt_changed"
 LICENSE_CHANGED = "license_changed"
+RECEIPT_CHANGED = "receipt_changed"  # ТЗ редактор накладных 30.10: правка/откат прихода поставщика
 
 # имя ленты (ChangeEvent.type) -> единое имя; product_changed разбирается по data.what отдельно
 FEED_TO_UNIFIED = {
@@ -42,6 +43,7 @@ FEED_TO_UNIFIED = {
     "client_changed": CLIENT_CHANGED,
     "bonus_changed": BONUS_CHANGED,
     "supplier_debt_changed": SUPPLIER_DEBT_CHANGED,
+    "receipt_changed": RECEIPT_CHANGED,
 }
 
 # единое имя -> старые имена ленты (для фильтра ?types=)
@@ -55,7 +57,7 @@ UNIFIED_TO_FEED.setdefault(PRODUCT_CHANGED, []).append("product_changed")
 STREAM_UNIFIED = (
     PRICE_CHANGED, PRODUCT_CHANGED, STOCK_CHANGED, SETTINGS_CHANGED, SALE_CREATED, SALE_CHANGED,
     SHIFT_CHANGED, STAFF_CHANGED, CLIENT_CHANGED, BONUS_CHANGED, DEBT_CHANGED, SUPPLIER_DEBT_CHANGED,
-    LICENSE_CHANGED,
+    LICENSE_CHANGED, RECEIPT_CHANGED,
 )
 
 

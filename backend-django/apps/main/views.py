@@ -297,10 +297,14 @@ def _receipt_payment_info(receipts):
         return tot.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
     flows = {}
+    refunds = {}  # ТЗ редактор накладных 30.10: сторно разницы при правке прихода (приход денег в кассу)
     for cf in CashFlow.objects.filter(
-        source_kind=CashFlow.SourceKind.PROCUREMENT_RECEIPT, source_id__in=ids, type=CashFlow.Type.EXPENSE
+        source_kind=CashFlow.SourceKind.PROCUREMENT_RECEIPT, source_id__in=ids
     ).select_related("cashbox"):
-        flows.setdefault(cf.source_id, []).append(cf)
+        if cf.type == CashFlow.Type.EXPENSE:
+            flows.setdefault(cf.source_id, []).append(cf)
+        else:
+            refunds[cf.source_id] = refunds.get(cf.source_id, Decimal("0.00")) + cf.amount
 
     deal_q = Q()
     for i in ids:
@@ -330,7 +334,7 @@ def _receipt_payment_info(receipts):
         rid = str(r.id)
         total = _total(r)
         cfs = flows.get(rid, [])
-        paid_cf = sum((cf.amount for cf in cfs), Decimal("0.00"))
+        paid_cf = sum((cf.amount for cf in cfs), Decimal("0.00")) - refunds.get(rid, Decimal("0.00"))
         deal = deals.get(rid)
         ptype = None
         if deal is not None:
@@ -6177,7 +6181,7 @@ def _receipt_discount_extras(data, items, by_id):
         pp = it.get("purchase_price")
         if pp is None:
             pp = getattr(prod, "purchase_price", None)
-        line = Decimal(str(pp or 0)) * Decimal(str(int(it["qty"])))
+        line = Decimal(str(pp or 0)) * Decimal(str(it["qty"]))  # ТЗ редактор накладных 30.10: кол-во с 3 знаками
         if it.get("line_total") is not None:  # ТЗ 31.10 п.19: сумма по накладной
             line = Decimal(str(it["line_total"]))
         base[id(it)] = line
@@ -6215,7 +6219,7 @@ def _receipt_discount_extras(data, items, by_id):
     lines = {}
     for it in items:
         line = base[id(it)]
-        qty = Decimal(str(int(it["qty"])))
+        qty = Decimal(str(it["qty"]))
         if subtotal > 0 and line > 0 and qty > 0:
             lines[id(it)] = line + delta * line / subtotal
             landed[id(it)] = lines[id(it)] / qty
@@ -6390,6 +6394,20 @@ class SupplierReceiptAPIView(CompanyBranchRestrictedMixin, APIView):
         if missing:
             raise ValidationError({"items": [f"Товары не найдены/не доступны: {', '.join(missing)}"]})
 
+        # ТЗ редактор накладных 30.10: дробное количество (3 знака) — только у весовых/мерных товаров
+        from apps.main.receipt_edit import allows_fraction
+
+        frac = {
+            f"items[{i}].qty": ["Дробное количество — только у весовых товаров (кг, л, м)."]
+            for i, it in enumerate(items)
+            if Decimal(str(it["qty"])) != Decimal(str(it["qty"])).to_integral_value()
+            and not allows_fraction(by_id[it["product"].id])
+        }
+        if frac:
+            from core.exceptions import ApiError
+
+            raise ApiError("fractional_not_allowed", "Дробное количество — только у весовых товаров.", fields=frac)
+
         # Привязываем поставщика к товарам (suppliers M2M) и фиксируем primary client
         for p in products:
             try:
@@ -6402,8 +6420,8 @@ class SupplierReceiptAPIView(CompanyBranchRestrictedMixin, APIView):
 
         # ТЗ 31.10 п.19: сумма строки по накладной без цены → закупка = сумма / количество (4 знака)
         for it in items:
-            if it.get("line_total") is not None and it.get("purchase_price") is None and int(it["qty"]) > 0:
-                it["purchase_price"] = (Decimal(str(it["line_total"])) / Decimal(int(it["qty"]))).quantize(
+            if it.get("line_total") is not None and it.get("purchase_price") is None and Decimal(str(it["qty"])) > 0:
+                it["purchase_price"] = (Decimal(str(it["line_total"])) / Decimal(str(it["qty"]))).quantize(
                     Decimal("0.0001"), rounding=ROUND_HALF_UP
                 )
 
@@ -6433,7 +6451,7 @@ class SupplierReceiptAPIView(CompanyBranchRestrictedMixin, APIView):
                         it["line_total"] = adj["lines"][id(it)].quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)
         for it in items:
             pid = it["product"].id
-            qty = int(it["qty"])
+            qty = Decimal(str(it["qty"]))  # ТЗ редактор накладных 30.10: дробное — у весовых
             prod = by_id[pid]
             upd = {"quantity": F("quantity") + qty}
             raw_pp = it.get("purchase_price")
@@ -6669,7 +6687,7 @@ class SupplierReceiptQuerysetMixin:
     def _supplier_receipts_base_queryset(self):
         line_total = _supplier_receipt_line_total_expr("items__")  # ТЗ 31.10 п.19
         qs = (
-            SupplierReceipt.objects.select_related("supplier", "company", "branch", "created_by")
+            SupplierReceipt.objects.select_related("supplier", "company", "branch", "created_by", "edited_by")
             .prefetch_related(*_RECEIPT_PREFETCH)
             .annotate(total_amount=Sum(line_total))
             # Meta.ordering is dropped by Django in GROUP BY queries (annotate+Sum),
@@ -6788,7 +6806,8 @@ class SupplierReceiptRetrieveAPIView(
 ):
     """
     GET   /api/main/suppliers/receipts/<uuid:pk>/  — ответ несёт version и ETag: "<version>"
-    PATCH /api/main/suppliers/receipts/<uuid:pk>/  — правка прихода (ТЗ 31.10 п.21, см. apps/main/receipt_edit.py)
+    PATCH /api/main/suppliers/receipts/<uuid:pk>/  — правка прихода (ТЗ редактор накладных 30.10,
+          см. apps/main/receipt_edit.py: Idempotency-Key, If-Match, dry_run, версии, деньги)
     """
 
     permission_classes = [permissions.IsAuthenticated]
@@ -6809,9 +6828,9 @@ class SupplierReceiptRetrieveAPIView(
         return resp
 
     def patch(self, request, *args, **kwargs):
-        from apps.main.receipt_edit import patch_receipt
+        from apps.main.receipt_edit import handle_patch
 
-        return patch_receipt(self, request, kwargs[self.lookup_url_kwarg])
+        return handle_patch(self, request, kwargs[self.lookup_url_kwarg])
 
 
 def _aggregate_purchase_batches_total_amount(item_qs):

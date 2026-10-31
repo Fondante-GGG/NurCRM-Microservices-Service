@@ -3510,9 +3510,27 @@ class AcceptanceReadSerializer(serializers.ModelSerializer):
 # ===========================
 # Supplier: receipt (оприходование)
 # ===========================
+class ReceiptQtyField(serializers.Field):
+    """
+    ТЗ редактор накладных 30.10: количество строки прихода хранится с 3 знаками (дробное — у весовых).
+    В ответе — число, как раньше: целое без дробной части (10), дробное — с ней (2.5).
+    """
+
+    def __init__(self, **kwargs):
+        kwargs.setdefault("read_only", True)
+        super().__init__(**kwargs)
+
+    def to_representation(self, value):
+        if value is None:
+            return None
+        d = Decimal(str(value))
+        return int(d) if d == d.to_integral_value() else float(d.quantize(Decimal("0.001")))
+
+
 class SupplierReceiptItemSerializer(serializers.Serializer):
     product = serializers.PrimaryKeyRelatedField(queryset=Product.objects.all())
-    qty = serializers.IntegerField(min_value=1)
+    # ТЗ редактор накладных 30.10: до 3 знаков (дробное — только у весовых, проверка во вьюхе)
+    qty = serializers.DecimalField(max_digits=12, decimal_places=3, min_value=Decimal("0.001"))
     # ТЗ 31.10 п.19: закупка до 4 знаков; line_total — сумма строки по накладной (берётся как есть)
     purchase_price = serializers.DecimalField(
         max_digits=14,
@@ -3566,6 +3584,7 @@ class SupplierReceiptItemReadSerializer(serializers.ModelSerializer):
     product_name = serializers.CharField(source="product.name", read_only=True)
     product_code = serializers.CharField(source="product.code", read_only=True)
     unit = serializers.CharField(source="product.unit", read_only=True, default="шт")
+    qty = ReceiptQtyField()  # ТЗ редактор накладных 30.10
     returned_qty = serializers.SerializerMethodField()
     returnable_qty = serializers.SerializerMethodField()
     # ТЗ 31.10 п.19: закупка до 4 знаков и сумма строки по накладной
@@ -3654,6 +3673,13 @@ class SupplierReceiptReadSerializer(serializers.ModelSerializer):
     attachments = serializers.SerializerMethodField()
     file = serializers.SerializerMethodField()
     created_by = serializers.UUIDField(source="created_by_id", read_only=True, allow_null=True)
+    # ТЗ редактор накладных 30.10: версия, правки и можно ли править сейчас (окно, право, возвраты, период)
+    edited = serializers.SerializerMethodField()
+    edited_by = serializers.SerializerMethodField()
+    edit_window = serializers.SerializerMethodField()
+    edit_window_until = serializers.SerializerMethodField()
+    can_edit = serializers.SerializerMethodField()
+    edit_block_reason = serializers.SerializerMethodField()
     # ТЗ 31.10 п.20: «ПР-2026-000123»; целое number остаётся как было
     number_display = serializers.SerializerMethodField()
     series = serializers.SerializerMethodField()
@@ -3670,6 +3696,14 @@ class SupplierReceiptReadSerializer(serializers.ModelSerializer):
             "year",
             "sequence",
             "version",  # ТЗ 31.10 п.21
+            "edited",  # ТЗ редактор накладных 30.10
+            "edit_count",
+            "edited_at",
+            "edited_by",
+            "edit_window",
+            "edit_window_until",
+            "can_edit",
+            "edit_block_reason",
             "comment",
             "document_number",
             "document_date",
@@ -3703,6 +3737,51 @@ class SupplierReceiptReadSerializer(serializers.ModelSerializer):
             "extra_costs",
             "items",
         ]
+
+    # --- ТЗ редактор накладных 30.10 ---
+    def get_edited(self, obj):
+        return bool(getattr(obj, "edit_count", 0))
+
+    def get_edited_by(self, obj):
+        from apps.main.receipt_edit import _user_ref
+
+        return _user_ref(obj.edited_by) if obj.edited_by_id else None
+
+    def _edit_ctx(self, obj):
+        """Окно и закрытый период компании — один раз на ответ (список приходов)."""
+        cache = self.context.setdefault("_receipt_edit_ctx", {})
+        cid = obj.company_id
+        if cid not in cache:
+            from apps.main.receipt_edit import receipt_edit_window
+            from apps.warehouse.services import get_closed_until
+
+            cache[cid] = {"window": receipt_edit_window(obj.company), "closed_until": get_closed_until(cid)}
+        return cache[cid]
+
+    def get_edit_window(self, obj):
+        return self._edit_ctx(obj)["window"]
+
+    def get_edit_window_until(self, obj):
+        from apps.main.receipt_edit import edit_window_until
+
+        until = edit_window_until(obj, self._edit_ctx(obj)["window"])
+        return until.isoformat() if until else None
+
+    def get_edit_block_reason(self, obj):
+        from apps.main.receipt_edit import edit_block_reason
+
+        request = self.context.get("request")
+        key = ("_edit_block", obj.pk)
+        if key not in self.context:
+            ctx = self._edit_ctx(obj)
+            self.context[key] = edit_block_reason(
+                obj, getattr(request, "user", None), window=ctx["window"], closed_until=ctx["closed_until"],
+                items=list(obj.items.all()),
+            )
+        return self.context[key]
+
+    def get_can_edit(self, obj):
+        return self.get_edit_block_reason(obj) is None
 
     def get_number_display(self, obj):
         return obj.number_info["number_display"]
@@ -3931,7 +4010,7 @@ class ProductPurchaseBatchSerializer(serializers.ModelSerializer):
     """
 
     receipt_id = serializers.UUIDField(source="receipt.id", read_only=True)
-    qty = serializers.IntegerField(read_only=True)
+    qty = ReceiptQtyField()  # ТЗ редактор накладных 30.10: целое — как раньше, у весовых — дробное
     purchase_price = serializers.DecimalField(
         max_digits=11, decimal_places=3, read_only=True
     )

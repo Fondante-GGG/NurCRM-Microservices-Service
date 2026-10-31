@@ -292,6 +292,9 @@ class Company(models.Model):
     )
     # ТЗ 29.10 Б-100: «финансы закрыты по» — инвесторы и стартовые расходы с датой <= этой только чтение
     finance_closed_until = models.DateField("Финансы закрыты по", null=True, blank=True)
+    # ТЗ редактор накладных 30.10: окно правки проведённого прихода "24h" | "48h" | "always".
+    # NULL — не задано (берётся старое значение из app-settings nurmarket-mobile, иначе 24h). Меняет только владелец.
+    receipt_edit_window = models.CharField("Окно правки приходов", max_length=8, null=True, blank=True)
     appointment_work_end = models.CharField(
         "Конец рабочего дня для записей",
         max_length=5,
@@ -733,7 +736,8 @@ class User(AbstractBaseUser, PermissionsMixin):
     can_edit_cashbox = models.BooleanField(null=True, blank=True, default=None, verbose_name="Менять: кассы")
     can_edit_products = models.BooleanField(null=True, blank=True, default=None, verbose_name="Менять: товары")
     can_edit_procurement = models.BooleanField(null=True, blank=True, default=None, verbose_name="Менять: закупки")
-    # ТЗ 31.10 п.21: правка проведённых приходов (NULL — по умолчанию: владелец и администратор)
+    # ТЗ 31.10 п.21 / ТЗ редактор накладных 30.10: правка проведённых приходов.
+    # Владелец — всегда; остальные — только явное True (NULL = нет). Выдаёт только владелец.
     can_edit_purchase_documents = models.BooleanField(null=True, blank=True, default=None, verbose_name="Менять: проведённые приходы")
     can_edit_documents = models.BooleanField(null=True, blank=True, default=None, verbose_name="Менять: документы склада")
     can_edit_clients = models.BooleanField(null=True, blank=True, default=None, verbose_name="Менять: клиенты и долги")

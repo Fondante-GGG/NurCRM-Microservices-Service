@@ -2,6 +2,14 @@
 
 Новые записи сверху. Единое ТЗ бэкенду 26.10.2026, разделы 8–11 (Б-52…Б-87).
 
+## 31.10.2026 — ТЗ «Редактор накладных закупок» (30.10), вариант А
+- `PATCH api/main/suppliers/receipts/{id}/` по подробному ТЗ: обязательный `Idempotency-Key` (повтор → `replayed: true`), `If-Match`/`version`, `reason` 5–500 + `reason_code`, `dry_run`, `lines` (старое `items` понимаем), `update_product_purchase_price`, `supplier_id`, `payment`, `source`, `device`. Ответ `{receipt, deltas, movements, warnings, replayed}`. Коды по таблице 3.2 через ApiError (`{code, detail, data}`): 412/409 version_conflict, 423 period_closed, построчный has_returns, receipt_fully_returned, negative_stock с min_qty, debt_already_paid, 422 validation_error/fractional_not_allowed.
+- Остатки — движение `receipt_correction` на каждую строку; закупка в карточке по правилу (удалили последний приход товара — откат к прошлому); оплаченный приход — сторно/доплата в ту же кассу (закрытая смена → основная касса, `shift_closed_money_to_main`); смена поставщика/оплаты — если не было возвратов и оплат долга.
+- Версии: `SupplierReceiptVersion`, `GET …/versions/`, `GET …/versions/{n}/`, `POST …/revert/`; лента `GET suppliers/receipts/changes/?since=`, событие `receipt_changed` (лента + WebSocket), Telegram владельцу.
+- Право `can_edit_purchase_documents` — по умолчанию только владелец, выдаёт только владелец (в списке сотрудников, форме и профиле — действующее значение). Окно правки `Company.receipt_edit_window` (по умолчанию 24h) в `users/company/`, менять — только владелец.
+- Количество строки прихода — numeric(12,3) (дробное только у весовых), в ответах по-прежнему число.
+- Миграции: main 0170_receipt_editor_1030, users 0071_company_receipt_edit_window_1030 (лёгкие).
+
 ## 30.10.2026 — ТЗ Умару по проверке выкатки (касса)
 - №9 электронный чек по QR: `POST/DELETE api/main/pos/sales/{id}/share-link/` (идемпотентно, срок 90 дней, отзыв → 404), страница `https://app.nurcrm.kg/r/<token>` без входа (ru/ky/uz/tr/en, 360 px, PDF и печать), `/r/<token>.pdf`; в JSON чека адрес, телефон, кассир, бонусы, статус возврата; `share_url` в продаже; `X-Robots-Tag: noindex`, `/robots.txt`.
 - №10 возврат со скидкой: у строки продажи `refundable_quantity`, `refundable_amount`, `unit_refund_price`; в ответе возврата `refund.lines`; новая касса при превышении — `refund_exceeds_paid` с `{line_id, max_quantity, max_amount}`. Расчёт — `apps/main/refund_calc.py`. Отказы 001916/001909 были до выкатки Н-02 (29.10).

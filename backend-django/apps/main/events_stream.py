@@ -98,6 +98,11 @@ def to_stream_event(ev: dict):
         if d.get("supplier") is not None:
             ids = [str(d["supplier"])]
         extra = {"supplier": str(d["supplier"]) if d.get("supplier") is not None else None}
+    elif t == "receipt_changed":
+        # ТЗ редактор накладных 30.10: {receipt_id, version, supplier_id, edited_by, at}
+        out_type = "receipt_changed"
+        ids = [str(d["receipt_id"])] if d.get("receipt_id") else []
+        extra = {k: d.get(k) for k in ("receipt_id", "version", "supplier_id", "edited_by")}
     if out_type is None:
         return None
 

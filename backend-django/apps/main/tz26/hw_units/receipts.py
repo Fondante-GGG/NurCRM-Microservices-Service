@@ -1,8 +1,9 @@
 """ТЗ 26.10, Б-53 п.5: приход и заказ поставщику в единицах закупки (sale_unit_id в строке).
 
 Остаток и закупочная цена хранятся в базовых единицах товара: количество строки умножается на factor,
-цена строки делится на factor. Строка прихода хранит целое количество (SupplierReceiptItem.qty), поэтому
-единица, дающая дробное базовое количество, в приход не принимается (400 receipt_qty_not_integer).
+цена строки делится на factor. Строка прихода хранит количество с 3 знаками (ТЗ редактор накладных 30.10),
+но дробное — только у весовых товаров: у штучного единица, дающая дробное базовое количество,
+в приход не принимается (400 receipt_qty_not_integer).
 """
 from decimal import Decimal, ROUND_HALF_UP
 
@@ -33,11 +34,14 @@ def convert_receipt_items(items):
         unit = _unit_for(it["product"], uid, what=f"Строка {i + 1}")
         base = Decimal(str(it["qty"])) * Decimal(str(unit.factor))
         if base != base.to_integral_value():
-            raise ApiError("receipt_qty_not_integer",
-                           f"Строка {i + 1}: {it['qty']} x {unit.factor} даёт дробное количество, приход хранит целое.",
-                           fields={"items": [f"Строка {i + 1}: дробное количество в базовых единицах."]})
+            from apps.main.receipt_edit import allows_fraction
+
+            if not allows_fraction(it["product"]):
+                raise ApiError("receipt_qty_not_integer",
+                               f"Строка {i + 1}: {it['qty']} x {unit.factor} даёт дробное количество, а товар штучный.",
+                               fields={"items": [f"Строка {i + 1}: дробное количество в базовых единицах."]})
         it["unit_qty"] = it["qty"]
-        it["qty"] = int(base)
+        it["qty"] = int(base) if base == base.to_integral_value() else base.quantize(Q3, rounding=ROUND_HALF_UP)
         for f in ("purchase_price",):
             if it.get(f) is not None:
                 it[f] = (Decimal(str(it[f])) / Decimal(str(unit.factor))).quantize(Q3, rounding=ROUND_HALF_UP)

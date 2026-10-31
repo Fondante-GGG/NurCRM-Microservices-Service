@@ -30,6 +30,8 @@ FEATURES = (
     # stock_balance, agents — добавятся вместе с функциями)
     "share_link", "receipt_attachments", "purchase_signature", "server_addons", "product_archive", "bulk_pay_debt",
     "receipt_patch",  # ТЗ 31.10 п.21: PATCH suppliers/receipts/{id}/ (dry_run, If-Match, коды ошибок)
+    # ТЗ редактор накладных 30.10 (вариант А): PATCH с Idempotency-Key, версии/откат, деньги, receipt_changed
+    "receipt_edit",
 )
 
 

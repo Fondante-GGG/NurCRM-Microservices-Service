@@ -3879,6 +3879,12 @@ class SupplierReceipt(models.Model):
     # ТЗ 31.10 п.21: версия для правки прихода (If-Match / version), comment — комментарий к документу
     version = models.PositiveIntegerField(default=1, db_default=1)
     comment = models.TextField(blank=True, default="", db_default="")
+    # ТЗ редактор накладных 30.10: сколько раз правили, когда и кто последним
+    edit_count = models.PositiveIntegerField(default=0, db_default=0)
+    edited_at = models.DateTimeField(null=True, blank=True)
+    edited_by = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True, related_name="edited_supplier_receipts",
+    )
 
     DOC_SERIES = "ПР"  # ТЗ 31.10 п.20
 
@@ -3961,7 +3967,8 @@ class SupplierReceiptItem(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     receipt = models.ForeignKey(SupplierReceipt, on_delete=models.CASCADE, related_name="items", db_index=True)
     product = models.ForeignKey(Product, on_delete=models.PROTECT, related_name="supplier_receipt_items", db_index=True)
-    qty = models.PositiveIntegerField()
+    # ТЗ редактор накладных 30.10: 3 знака — дробное количество у весовых товаров (раньше целое)
+    qty = models.DecimalField(max_digits=12, decimal_places=3)
     # ТЗ 31.10 п.19: закупка с 4 знаками; line_total — сумма строки «как в накладной» (хранится как пришла)
     purchase_price = models.DecimalField(max_digits=14, decimal_places=4, null=True, blank=True)
     line_total = models.DecimalField(max_digits=16, decimal_places=4, null=True, blank=True)
@@ -3998,6 +4005,41 @@ class SupplierReceiptItem(models.Model):
                 except Exception:
                     pass
                 raise ValidationError({"product": "Товар не принадлежит выбранному поставщику."})
+
+
+class SupplierReceiptVersion(models.Model):
+    """
+    ТЗ редактор накладных 30.10: снимок прихода на каждую версию.
+    Версия 1 — исходный документ (пишется при первой правке), дальше — после каждой правки/отката.
+    snapshot — шапка и строки после этой версии; lines_diff — что изменилось относительно прошлой.
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    receipt = models.ForeignKey(SupplierReceipt, on_delete=models.CASCADE, related_name="versions")
+    company = models.ForeignKey(Company, on_delete=models.CASCADE, related_name="+", db_index=True)
+    version = models.PositiveIntegerField()
+    action = models.CharField(max_length=16, blank=True, default="")  # create | edit | revert
+    at = models.DateTimeField(default=timezone.now, db_index=True)
+    user = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name="+")
+    device = models.CharField(max_length=128, blank=True, default="")
+    source = models.CharField(max_length=16, blank=True, default="")
+    reason = models.CharField(max_length=500, blank=True, default="")
+    reason_code = models.CharField(max_length=32, blank=True, default="")
+    total = models.DecimalField(max_digits=16, decimal_places=2, default=Decimal("0.00"))
+    snapshot = models.JSONField(default=dict, blank=True)
+    lines_diff = models.JSONField(default=list, blank=True)
+
+    class Meta:
+        verbose_name = "Версия прихода"
+        verbose_name_plural = "Версии приходов"
+        ordering = ["receipt", "version"]
+        constraints = [
+            models.UniqueConstraint(fields=["receipt", "version"], name="uniq_supplier_receipt_version"),
+        ]
+        indexes = [models.Index(fields=["company", "at"], name="sup_rcpt_ver_company_at")]
+
+    def __str__(self):
+        return f"{self.receipt_id} v{self.version}"
 
 
 class SupplierReturn(models.Model):
@@ -6406,6 +6448,7 @@ class StockMovement(models.Model):
         AGENT_RETURN = "agent_return", "Возврат от агента"
         STAFF_TRANSFER = "staff_transfer", "Передача между сотрудниками"
         STAFF_RETURN = "staff_return", "Возврат между сотрудниками"
+        RECEIPT_CORRECTION = "receipt_correction", "Правка прихода"  # ТЗ редактор накладных 30.10
 
     class Warehouse(models.TextChoices):
         FINISHED_GOODS = "finished_goods", "Готовая продукция"
