@@ -48,6 +48,7 @@ from apps.main.showcase.size_charts import SizeChartListCreateAPIView, SizeChart
 from apps.main.supplier_receipt_pdf import SupplierReceiptPdfAPIView
 from apps.main.media_receipts import MainMediaListCreateAPIView, MainMediaDetailAPIView, SalePublicLinkAPIView
 from apps.main.receipt_share import SaleShareLinkAPIView
+from apps.main.sale_items_api import SaleItemsBatchAPIView
 from apps.main.receipt_files import SupplierReceiptFileAPIView
 from apps.main.transfer_files import StockTransferDetailAPIView, StockTransferFileAPIView  # ТЗ 31.10 п.22
 from apps.main.showcase.views_public import PublicCompanyShowcaseFacetsAPIView, PublicCompanyProductDetailAPIView, PublicCompanyAPIView, PublicCompanyShowcaseAPIView
@@ -413,6 +414,7 @@ urlpatterns = [
         name="client-subscription-schedule",
     ),
     
+    path("pos/sales/items/", SaleItemsBatchAPIView.as_view(), name="pos-sale-items-batch"),  # ТЗ 31.10 п.11
     path("pos/sales/", SaleListAPIView.as_view(), name="pos-sale-list"),
     path("pos/checkout/batch/", PosCheckoutBatchAPIView.as_view(), name="pos-checkout-batch"),
     path("pos/checkout/", PosQuickCheckoutAPIView.as_view(), name="pos-quick-checkout"),
