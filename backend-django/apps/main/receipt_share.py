@@ -15,6 +15,7 @@ from django.db import IntegrityError, transaction
 from django.http import HttpResponse
 from django.utils import timezone
 from rest_framework import permissions
+from rest_framework.negotiation import BaseContentNegotiation
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -264,8 +265,21 @@ def render_not_found_html(lang):
     )
 
 
+class _IgnoreAcceptNegotiation(BaseContentNegotiation):
+    """ТЗ 31.10 п.17: страница сама отдаёт HTML/PDF (HttpResponse) — Accept не проверяем, иначе DRF отвечал 406
+    на `Accept: application/pdf` ещё до get(), и даже неизвестный токен .pdf давал 406 вместо 404."""
+
+    def select_parser(self, request, parsers):
+        return parsers[0] if parsers else None
+
+    def select_renderer(self, request, renderers, format_suffix=None):
+        return renderers[0], renderers[0].media_type
+
+
 class PublicReceiptPageView(APIView):
     """GET /r/<token> — HTML; GET /r/<token>.pdf — PDF. Неизвестная/отозванная/просроченная → 404."""
+
+    content_negotiation_class = _IgnoreAcceptNegotiation
 
     authentication_classes = []
     permission_classes = [permissions.AllowAny]

@@ -76,6 +76,10 @@ class ShareLinkTests(TestCase):
         r = self.pub.get(f"/r/{tok}.pdf")
         self.assertEqual(r.status_code, 200)
         self.assertTrue(r.content.startswith(b"%PDF"))
+        # ТЗ 31.10 п.17: Accept: application/pdf не даёт 406; неизвестный токен — 404
+        r = self.pub.get(f"/r/{tok}.pdf", HTTP_ACCEPT="application/pdf")
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(self.pub.get("/r/nope-nope-nope.pdf", HTTP_ACCEPT="application/pdf").status_code, 404)
         j = self.pub.get(f"/api/public/receipts/{tok}/").json()
         self.assertEqual(j["status"], "paid")
         self.assertEqual(j["cashier"], "Айгуль")
