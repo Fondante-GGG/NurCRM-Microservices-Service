@@ -3797,6 +3797,31 @@ class Client(models.Model):
 # ==========================
 # Supplier receipts (оприходования)
 # ==========================
+def supplier_doc_number(series, number, created_at):
+    """
+    ТЗ 31.10 п.20: номер документа поставщика для показа — «ПР-2026-000123» / «ВП-2026-000007».
+    sequence — сквозной номер в компании (целое поле number), year — год проведения (местное время).
+    """
+    if number is None:
+        return {"number_display": None, "series": series, "year": None, "sequence": None}
+    year = timezone.localtime(created_at).year if created_at else timezone.localdate().year
+    return {
+        "number_display": f"{series}-{year}-{int(number):06d}",
+        "series": series,
+        "year": year,
+        "sequence": int(number),
+    }
+
+
+def _next_company_number(model, company_id, lock_key):
+    """Следующий номер документа в компании под advisory-блокировкой (как у прихода, ТЗ 30.10)."""
+    if connection.vendor == "postgresql":
+        with connection.cursor() as cur:
+            cur.execute("SELECT pg_advisory_xact_lock(hashtext(%s))", [f"{lock_key}:{company_id}"])
+    last = model.objects.filter(company_id=company_id).aggregate(m=Max("number"))["m"]
+    return (last or 0) + 1
+
+
 class SupplierReceipt(models.Model):
     """
     Журнал оприходований от поставщиков.
@@ -3842,6 +3867,8 @@ class SupplierReceipt(models.Model):
     document_date = models.DateField(null=True, blank=True)
     attachments = models.ManyToManyField("main.MainMedia", blank=True, related_name="supplier_receipts")
 
+    DOC_SERIES = "ПР"  # ТЗ 31.10 п.20
+
     class Meta:
         verbose_name = "Оприходование от поставщика"
         verbose_name_plural = "Оприходования от поставщика"
@@ -3862,13 +3889,14 @@ class SupplierReceipt(models.Model):
             # ТЗ 30.10: следующий номер прихода в компании. Отдельная advisory-блокировка
             # на компанию (не строка Company — та горячая), снимается в конце транзакции.
             with transaction.atomic():
-                if connection.vendor == "postgresql":
-                    with connection.cursor() as cur:
-                        cur.execute("SELECT pg_advisory_xact_lock(hashtext(%s))", [f"supplier_receipt_no:{self.company_id}"])
-                last = SupplierReceipt.objects.filter(company_id=self.company_id).aggregate(m=Max("number"))["m"]
-                self.number = (last or 0) + 1
+                self.number = _next_company_number(SupplierReceipt, self.company_id, "supplier_receipt_no")
                 return super().save(*args, **kwargs)
         return super().save(*args, **kwargs)
+
+    @property
+    def number_info(self):
+        """ТЗ 31.10 п.20: number_display «ПР-2026-000123», series, year, sequence."""
+        return supplier_doc_number(self.DOC_SERIES, self.number, self.created_at)
 
 
 class PurchaseOrder(models.Model):
@@ -3926,6 +3954,10 @@ class SupplierReceiptItem(models.Model):
     line_total = models.DecimalField(max_digits=16, decimal_places=4, null=True, blank=True)
     # ТЗ Н-33: закупка за единицу с учётом скидки и доп. расходов (только если они переданы)
     landed_price = models.DecimalField(max_digits=14, decimal_places=4, null=True, blank=True)
+    # ТЗ 31.10 п.20: цена продажи до и после прихода и наценка после прихода (снимок при проведении)
+    markup_percent = models.DecimalField(max_digits=12, decimal_places=4, null=True, blank=True)
+    sale_price = models.DecimalField(max_digits=10, decimal_places=3, null=True, blank=True)
+    previous_sale_price = models.DecimalField(max_digits=10, decimal_places=3, null=True, blank=True)
 
     class Meta:
         verbose_name = "Строка оприходования"
@@ -4014,6 +4046,10 @@ class SupplierReturn(models.Model):
     status = models.CharField(max_length=16, choices=Status.choices, default=Status.POSTED, db_index=True)
     cashbox = models.ForeignKey("construction.Cashbox", on_delete=models.SET_NULL, null=True, blank=True, related_name="supplier_returns")
     created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+    # ТЗ 31.10 п.20: номер возврата в компании (как у прихода), показ — «ВП-2026-000007»
+    number = models.PositiveIntegerField(null=True, blank=True, db_index=True)
+
+    DOC_SERIES = "ВП"
 
     class Meta:
         verbose_name = "Возврат поставщику"
@@ -4031,6 +4067,17 @@ class SupplierReturn(models.Model):
             raise ValidationError({"branch": "Филиал принадлежит другой компании."})
         if self.receipt_id and self.supplier_id and self.receipt.supplier_id != self.supplier_id:
             raise ValidationError({"receipt": "Приход принадлежит другому поставщику."})
+
+    def save(self, *args, **kwargs):
+        if self.number is None and self.company_id:
+            with transaction.atomic():
+                self.number = _next_company_number(SupplierReturn, self.company_id, "supplier_return_no")
+                return super().save(*args, **kwargs)
+        return super().save(*args, **kwargs)
+
+    @property
+    def number_info(self):
+        return supplier_doc_number(self.DOC_SERIES, self.number, self.created_at)
 
 
 class SupplierReturnItem(models.Model):

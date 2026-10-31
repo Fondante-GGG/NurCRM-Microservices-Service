@@ -6477,6 +6477,10 @@ class SupplierReceiptAPIView(CompanyBranchRestrictedMixin, APIView):
                     ).quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)
 
             type(prod).objects.filter(id=pid).update(**upd)
+            # ТЗ 31.10 п.20: снимок цены продажи до/после прихода и наценки — в строку прихода
+            it["_previous_sale_price"] = getattr(prod, "price", None)
+            it["_sale_price"] = upd.get("price", getattr(prod, "price", None))
+            it["_markup_percent"] = upd.get("markup_percent", getattr(prod, "markup_percent", None))
             # Журнал товара (ТЗ п.8): смена цены продажи приходом — было → стало.
             if "price" in upd:
                 try:
@@ -6502,6 +6506,9 @@ class SupplierReceiptAPIView(CompanyBranchRestrictedMixin, APIView):
                     qty=qty,
                     purchase_price=it.get("purchase_price"),
                     line_total=it.get("line_total"),  # ТЗ 31.10 п.19
+                    previous_sale_price=it.get("_previous_sale_price"),  # ТЗ 31.10 п.20
+                    sale_price=it.get("_sale_price"),
+                    markup_percent=it.get("_markup_percent"),
                     landed_price=((adj["landed"].get(id(it)).quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)) if adj and adj["landed"].get(id(it)) is not None else None),
                 )
             )
@@ -6592,6 +6599,7 @@ class SupplierReceiptAPIView(CompanyBranchRestrictedMixin, APIView):
             "id": str(receipt.id),
             "receipt_id": str(receipt.id),
             "number": receipt.number,
+            **receipt.number_info,  # ТЗ 31.10 п.20: number_display, series, year, sequence
             "document_number": receipt.document_number,
             "document_date": receipt.document_date.isoformat() if receipt.document_date else None,
             "order_id": str(po_order.id) if po_order else None,
@@ -6891,6 +6899,14 @@ class SupplierReturnListAPIView(CompanyBranchRestrictedMixin, generics.ListAPIVi
         receipt_id = (qp.get("receipt_id") or "").strip()
         if receipt_id:
             qs = qs.filter(receipt_id=receipt_id)
+
+        # ТЗ 31.10 п.20: ?number= — номер возврата в компании (целое или «ВП-2026-000007» — по цифрам в конце)
+        num_raw = (qp.get("number") or "").strip()
+        if num_raw:
+            m = re.search(r"(\d+)\s*$", num_raw)
+            if not m:
+                return qs.none()
+            qs = qs.filter(number=int(m.group(1)))
 
         reason = (qp.get("reason") or "").strip()
         if reason:

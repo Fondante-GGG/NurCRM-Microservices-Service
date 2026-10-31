@@ -3571,6 +3571,10 @@ class SupplierReceiptItemReadSerializer(serializers.ModelSerializer):
     # ТЗ 31.10 п.19: закупка до 4 знаков и сумма строки по накладной
     purchase_price = Price4Field(max_digits=14, decimal_places=4, read_only=True, allow_null=True)
     line_total = serializers.SerializerMethodField()
+    # ТЗ 31.10 п.20: наценка и цена продажи после прихода, цена продажи до прихода (снимок строки)
+    markup_percent = serializers.DecimalField(max_digits=12, decimal_places=4, read_only=True, allow_null=True)
+    sale_price = Price4Field(max_digits=10, decimal_places=3, read_only=True, allow_null=True)
+    previous_sale_price = Price4Field(max_digits=10, decimal_places=3, read_only=True, allow_null=True)
     # ТЗ 30.10 «Поступления»: партия строки (Б-61) и её текущий остаток
     batch_id = serializers.SerializerMethodField()
     batch_number = serializers.SerializerMethodField()
@@ -3582,6 +3586,7 @@ class SupplierReceiptItemReadSerializer(serializers.ModelSerializer):
             "id", "product", "product_id", "product_name", "product_code",
             "qty", "purchase_price", "line_total", "returned_qty", "returnable_qty", "unit",
             "batch_id", "batch_number", "batch_remaining",
+            "markup_percent", "sale_price", "previous_sale_price",
         ]
 
     def _batch(self, obj):
@@ -3649,12 +3654,21 @@ class SupplierReceiptReadSerializer(serializers.ModelSerializer):
     attachments = serializers.SerializerMethodField()
     file = serializers.SerializerMethodField()
     created_by = serializers.UUIDField(source="created_by_id", read_only=True, allow_null=True)
+    # ТЗ 31.10 п.20: «ПР-2026-000123»; целое number остаётся как было
+    number_display = serializers.SerializerMethodField()
+    series = serializers.SerializerMethodField()
+    year = serializers.SerializerMethodField()
+    sequence = serializers.SerializerMethodField()
 
     class Meta:
         model = SupplierReceipt
         fields = [
             "id",
             "number",
+            "number_display",
+            "series",
+            "year",
+            "sequence",
             "document_number",
             "document_date",
             "attachments",
@@ -3687,6 +3701,18 @@ class SupplierReceiptReadSerializer(serializers.ModelSerializer):
             "extra_costs",
             "items",
         ]
+
+    def get_number_display(self, obj):
+        return obj.number_info["number_display"]
+
+    def get_series(self, obj):
+        return obj.number_info["series"]
+
+    def get_year(self, obj):
+        return obj.number_info["year"]
+
+    def get_sequence(self, obj):
+        return obj.number_info["sequence"]
 
     def get_attachments(self, obj):
         from apps.main.media_receipts import media_payload
@@ -3808,7 +3834,7 @@ class SupplierReturnReadSerializer(serializers.ModelSerializer):
     class Meta:
         model = SupplierReturn
         fields = [
-            "id", "supplier_id", "supplier_name", "receipt_id",
+            "id", "number", "supplier_id", "supplier_name", "receipt_id",
             "created_at", "created_by_name", "reason", "comment",
             "compensation", "status", "items_count", "total_amount",
             "items",
@@ -3816,6 +3842,7 @@ class SupplierReturnReadSerializer(serializers.ModelSerializer):
 
     def to_representation(self, instance):
         ret = super().to_representation(instance)
+        ret.update(instance.number_info)  # ТЗ 31.10 п.20: number_display «ВП-2026-000007», series, year, sequence
         ret["uuid"] = ret["id"]
         ret["supplierId"] = ret["supplier_id"]
         ret["compensation_type"] = ret["compensation"]
