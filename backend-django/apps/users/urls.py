@@ -1,5 +1,7 @@
 from apps.users.app_settings_views import CompanyFeatureActivateAPIView, CompanyFeatureTrialAPIView, CompanyFeaturesListAPIView, UserAppSettingsAPIView
 from django.urls import path
+from apps.main.ai_advisor_web import AiAdvisorAskAPIView, AiAdvisorAskVoiceAPIView, AiAdvisorInvoiceApplyAPIView, AiAdvisorInvoiceParseAPIView, AiAdvisorSettingsAPIView, AiAdvisorStatusAPIView, AiAdvisorTestKeyAPIView
+from apps.users.password_reset import PasswordResetCheckAPIView, PasswordResetConfirmAPIView, PasswordResetRequestEmailAPIView
 from apps.users.support_views import SupportCompanyFeaturesAPIView
 from .views import (
     CompanyAddonListAPIView,
@@ -51,6 +53,16 @@ from .views_access import (  # ТЗ Н-16
 )
 
 urlpatterns = [
+    path("ai-advisor/", AiAdvisorStatusAPIView.as_view(), name="ai-advisor-status"),
+    path("ai-advisor/ask/", AiAdvisorAskAPIView.as_view(), name="ai-advisor-ask"),
+    path("ai-advisor/settings/", AiAdvisorSettingsAPIView.as_view(), name="ai-advisor-settings"),
+    path("ai-advisor/test-key/", AiAdvisorTestKeyAPIView.as_view(), name="ai-advisor-test-key"),
+    path("ai-advisor/ask-voice/", AiAdvisorAskVoiceAPIView.as_view(), name="ai-advisor-ask-voice"),
+    path("ai-advisor/invoice/parse/", AiAdvisorInvoiceParseAPIView.as_view(), name="ai-advisor-invoice-parse"),
+    path("ai-advisor/invoice/apply/", AiAdvisorInvoiceApplyAPIView.as_view(), name="ai-advisor-invoice-apply"),
+    path("password-reset/request/", PasswordResetRequestEmailAPIView.as_view(), name="password-reset-request"),
+    path("password-reset/check/", PasswordResetCheckAPIView.as_view(), name="password-reset-check"),
+    path("password-reset/confirm/", PasswordResetConfirmAPIView.as_view(), name="password-reset-confirm"),
     # 🔐 Авторизация / регистрация
     path('auth/register/', RegisterAPIView.as_view(), name='user-register'),
     path('auth/login/', CustomTokenObtainPairView.as_view(), name='token_obtain_pair'),
