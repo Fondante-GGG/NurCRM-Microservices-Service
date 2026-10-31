@@ -883,6 +883,53 @@ def _sale_refundable_total(sale):
     return str(money(max(Decimal(str(sale.total or 0)), Decimal("0.00"))))
 
 
+def _original_receipt_fields(sale, data, *, detail, context=None):
+    """ТЗ 31.10 п.3: в ответе чека — исходные строки/итог/оплаты, возврат — отдельно.
+
+    Модель не меняется (возврат по-прежнему уменьшает строки и Sale.total — на это
+    опираются выручка, смена, остатки, долги), меняется только представление.
+    net_total — итог за вычетом возвратов; refundable_total — сколько ещё можно вернуть.
+    """
+    from apps.main.sale_original import original_change, original_receipt, return_status, sale_refunds
+
+    orig = original_receipt(sale)
+    refunded = orig["refunded_total"]
+    data["refunded_total"] = str(money(refunded))
+    data["net_total"] = str(money(max(Decimal(str(orig["total"] or 0)) - refunded, Decimal("0.00"))))
+    data["return_status"] = return_status(sale, refunded)
+    if detail:
+        data["refunds"] = sale_refunds(sale) if orig["has_returns"] else []
+    if not orig["has_returns"]:
+        return data
+    for key in ("subtotal", "discount_total", "tax_total", "total", "cash_received"):
+        if key in data:
+            val = orig.get(key)
+            data[key] = None if val is None else str(money(Decimal(str(val))))
+    if "change" in data:
+        data["change"] = str(money(original_change(sale, orig)))
+    items = orig["items"]
+    if detail:
+        data["items"] = SaleItemReadSerializer(items, many=True, context=context or {}).data
+        if orig["payments"] is not None and "payments" in data:
+            from apps.main.pos_utils import fmt_money
+
+            labels = dict(Sale.PaymentMethod.choices)
+            data["payments"] = [
+                {"method": p["method"], "method_display": labels.get(p["method"], p["method"]),
+                 "amount": fmt_money(p["amount"])}
+                for p in orig["payments"]
+            ]
+    else:
+        first = min(items, key=lambda i: str(i.id)) if items else None
+        name = None
+        if first is not None:
+            name = (first.name_snapshot or "").strip() or getattr(getattr(first, "product", None), "name", None)
+        data["first_item_name"] = name
+        data["items_preview"] = name
+        data["items_count"] = len(items)
+    return data
+
+
 class SaleListSerializer(serializers.ModelSerializer):
     user_display = serializers.SerializerMethodField()
     consultant_display = serializers.SerializerMethodField(read_only=True)
@@ -1085,6 +1132,10 @@ class SaleListSerializer(serializers.ModelSerializer):
         deal = _linked_debt_deal(obj)
         return str(deal.id) if deal else None
 
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        return _original_receipt_fields(instance, data, detail=False)  # ТЗ 31.10 п.3
+
 
 class SaleItemReadSerializer(serializers.ModelSerializer):
     variant_size = serializers.CharField(source="variant.size", read_only=True, default=None)
@@ -1100,6 +1151,7 @@ class SaleItemReadSerializer(serializers.ModelSerializer):
     price_override_reason = serializers.SerializerMethodField()
     returnable_qty = serializers.SerializerMethodField()
     quantity_refunded = serializers.SerializerMethodField()  # ТЗ Н-07
+    returned_qty = serializers.SerializerMethodField()  # ТЗ 31.10 п.3: возвращено по строке
     # ТЗ 30.10 №10: остаток к возврату по строке по правилу сервера
     refundable_quantity = serializers.SerializerMethodField()
     refundable_amount = serializers.SerializerMethodField()
@@ -1147,6 +1199,7 @@ class SaleItemReadSerializer(serializers.ModelSerializer):
             "price_override_reason",
             "returnable_qty",
             "quantity_refunded",
+            "returned_qty",
             "refundable_quantity",
             "refundable_amount",
             "unit_refund_price",
@@ -1181,10 +1234,16 @@ class SaleItemReadSerializer(serializers.ModelSerializer):
 
     def get_quantity_refunded(self, obj):
         """ТЗ Н-07: сколько по строке уже возвращено (по SaleReturn.returned_items)."""
+        if getattr(obj, "_returned_qty", None) is not None:  # ТЗ 31.10 п.3: строка исходного чека
+            return str(qty3(obj._returned_qty))
         sale = getattr(obj, "sale", None)
         if sale is None:
             return "0.000"
         return str(qty3(_sale_returns_info(sale)[1].get(str(obj.id), Decimal("0"))))
+
+    def get_returned_qty(self, obj):
+        """ТЗ 31.10 п.3: возвращено по строке (quantity — исходное количество чека)."""
+        return self.get_quantity_refunded(obj)
 
     def get_price(self, obj):
         return str(money(obj.unit_price or Decimal("0.00")))
@@ -1219,8 +1278,17 @@ class SaleItemReadSerializer(serializers.ModelSerializer):
         остаток к возврату — это и есть текущее количество. Поле отдаём явно,
         чтобы фронт ограничивал «Макс. возврат» по стабильному имени, а не
         догадывался по `quantity`.
+
+        ТЗ 31.10 п.3: в ответе чека `quantity` — исходное количество, поэтому остаток
+        берём из `_current_qty` (текущая строка в базе; удалённая — 0).
         """
-        return qty3(Decimal(str(obj.quantity or 0)))
+        cur = getattr(obj, "_current_qty", None)
+        if cur is None:
+            cur = Decimal(str(obj.quantity or 0))
+        sale = getattr(obj, "sale", None)
+        if sale is not None and sale.status == Sale.Status.CANCELED:
+            return qty3(Decimal("0"))
+        return qty3(cur)
 
     def get_price_override_reason(self, obj):
         if getattr(obj, "price_manually_edited", False):
@@ -1314,6 +1382,11 @@ class SaleDetailSerializer(serializers.ModelSerializer):
     def get_created_by(self, obj):
         from apps.main.tz26.pos_sync.services import user_brief
         return user_brief(obj.user)
+
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        # ТЗ 31.10 п.3: исходный чек + возвраты отдельно (refunds[], refunded_total, return_status)
+        return _original_receipt_fields(instance, data, detail=True, context=self.context)
 
     def get_refunded_total(self, obj):
         return _sale_refunded_total(obj)

@@ -228,43 +228,32 @@ def receipt_public_data(link):
     sale = link.sale
     vh = receipt_vendor_header(sale)
     dt = timezone.localtime(sale.created_at) if sale.created_at else timezone.localtime()
+    # ТЗ 31.10 п.3: исходные строки чека (возврат строк не удаляет из ответа), у строки —
+    # сколько вернули; полностью возвращённая строка помечена returned=True. Без задвоения.
+    from apps.main.sale_original import original_receipt
+
+    orig = original_receipt(sale)
     items = []
-    for it in sale.items.all():
+    for it in orig["items"]:
         qty = Decimal(str(it.quantity or 0))
         unit = Decimal(str(it.unit_price or 0))
         disc = Decimal(str(getattr(it, "line_discount", 0) or 0))
+        r_qty = Decimal(str(getattr(it, "_returned_qty", 0) or 0))
         items.append({
             "name": (getattr(it, "name_snapshot", None) or getattr(it, "custom_name", None) or "").strip(),
             "qty": format(qty.normalize(), "f"),
             "unit_price": _m2(unit),
             "line_discount": _m2(disc),
             "total": _m2(unit * qty - disc),
-            "returned": False,
+            "returned": bool(qty > 0 and r_qty >= qty),
+            "returned_qty": format(r_qty.normalize(), "f"),
         })
-    # 31.10: полный возврат удаляет строки чека (SaleItem), поэтому возвращённые позиции берём из SaleReturn.returned_items
-    # и показываем с пометкой returned=True (у частичного возврата это уменьшенная часть строки).
-    for ret in sale.returns.all().order_by("created_at"):
-        for row in (ret.returned_items or []):
-            if not isinstance(row, dict):
-                continue
-            try:
-                r_qty = Decimal(str(row.get("qty") or 0))
-                r_price = Decimal(str(row.get("price") or 0))
-                r_disc = Decimal(str(row.get("discount") or 0))
-                r_total = Decimal(str(row.get("total") if row.get("total") is not None else row.get("amount") or 0))
-            except Exception:
-                continue
-            items.append({
-                "name": (row.get("name") or "").strip(),
-                "qty": format(r_qty.normalize(), "f"),
-                "unit_price": _m2(r_price),
-                "line_discount": _m2(r_disc),
-                "total": _m2(r_total),
-                "returned": True,
-            })
-    payments = [{"method": p.method, "amount": _m2(p.amount)} for p in sale.payments.all()]
+    if orig["payments"] is not None:
+        payments = [{"method": p["method"], "amount": _m2(p["amount"])} for p in orig["payments"]]
+    else:
+        payments = [{"method": p.method, "amount": _m2(p.amount)} for p in sale.payments.all()]
     if not payments and sale.payment_method:
-        payments = [{"method": sale.payment_method, "amount": _m2(sale.total)}]
+        payments = [{"method": sale.payment_method, "amount": _m2(orig["total"])}]
     rating = SaleReceiptRating.objects.filter(link=link).first()
     # ТЗ 30.10 №9: адрес, телефон, кассир, бонусы, статус возврата
     company = sale.company
@@ -276,7 +265,7 @@ def receipt_public_data(link):
     if sale.client_id:
         parts = (getattr(sale.client, "full_name", "") or "").split()
         client_initials = "".join(f"{p[0].upper()}." for p in parts[:2] if p)
-    returned = sale.returns.aggregate(s=Sum("returned_amount"))["s"] or Decimal("0")
+    returned = orig["refunded_total"]
     if sale.status == Sale.Status.CANCELED or (returned > 0 and Decimal(str(sale.total or 0)) <= 0):
         receipt_status = "returned"
     elif returned > 0 or sale.status == Sale.Status.PARTIALLY_RETURNED:
@@ -285,9 +274,8 @@ def receipt_public_data(link):
         receipt_status = "debt"
     else:
         receipt_status = "paid"
-    # сумма покупки / возвращено / к оплате: у полного возврата sale.total не уменьшается, у частичного уже уменьшен
-    sale_total = Decimal(str(sale.total or 0))
-    purchase_total = returned if (returned > 0 and sale.status == Sale.Status.CANCELED) else sale_total + returned
+    # сумма покупки = исходный итог чека; к оплате = итог − возвраты (ТЗ 31.10 п.3)
+    purchase_total = Decimal(str(orig["total"] or 0))
     to_pay = max(purchase_total - returned, Decimal("0"))
     bonus_earned = sale.bonus_transactions.filter(reason="earn").aggregate(s=Sum("delta"))["s"] or Decimal("0")
     return {
@@ -301,10 +289,10 @@ def receipt_public_data(link):
         "date": dt.isoformat(),
         "items": items,
         "totals": {
-            "subtotal": _m2(sale.subtotal),
-            "discount_total": _m2(sale.discount_total),
-            "tax_total": _m2(sale.tax_total),
-            "total": _m2(sale.total),
+            "subtotal": _m2(orig["subtotal"]),
+            "discount_total": _m2(orig["discount_total"]),
+            "tax_total": _m2(orig["tax_total"]),
+            "total": _m2(orig["total"]),
             "returned_total": _m2(returned),
             "purchase_total": _m2(purchase_total),
             "to_pay": _m2(to_pay),
