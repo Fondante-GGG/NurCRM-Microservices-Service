@@ -45,7 +45,7 @@ from apps.main.pos_serializers import MoneyField, QtyField, _is_owner_like
 from apps.main.pos_utils import money, qty3
 from apps.main.tz26.pos_sync.services import return_origin_fields  # Б-67
 from apps.main.views import CompanyBranchRestrictedMixin, _filter_clients_visible_for_user
-from core.api_compat import is_new_client, is_strict, parse_client
+from core.api_compat import is_new_client, is_strict, may_use_foreign_shift, parse_client
 import logging
 
 logger = logging.getLogger(__name__)
@@ -574,15 +574,15 @@ class PosQuickCheckoutAPIView(APIView):
                         company=company, cashier=user, at=offline_at,
                         shift_id=data.get("shift"), cashbox_id=data.get("cashbox"),
                     )
-                    if shift.cashier_id != user.id and not _is_owner_like(user):
+                    if shift.cashier_id != user.id and not may_use_foreign_shift(request, user, _is_owner_like(user)):
                         raise self._shift_not_owned(request, company)
                 elif data.get("shift") and offline_at:
                     shift = _resolve_offline_shift(company=company, shift_id=data["shift"], at=offline_at)
-                    if shift.cashier_id != user.id and not _is_owner_like(user):
+                    if shift.cashier_id != user.id and not may_use_foreign_shift(request, user, _is_owner_like(user)):
                         raise self._shift_not_owned(request, company)
                 elif data.get("shift"):
                     shift = _resolve_requested_open_shift(company=company, cashier=user, shift_id=data["shift"])
-                    if shift.cashier_id != user.id and not _is_owner_like(user):
+                    if shift.cashier_id != user.id and not may_use_foreign_shift(request, user, _is_owner_like(user)):
                         raise self._shift_not_owned(request, company)
                 else:
                     shift = _find_open_shift_for_cashier(company=company, cashier=user)

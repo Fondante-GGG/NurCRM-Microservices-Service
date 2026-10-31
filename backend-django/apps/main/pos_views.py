@@ -1,3 +1,4 @@
+from core.api_compat import may_use_foreign_shift
 from apps.main.services_debt import debt_detached_client as _debt_detached_client  # ТЗ 29.10 Б-13
 from apps.users.pin import pin_guard
 from apps.integrations.idempotency import idempotent
@@ -3390,7 +3391,7 @@ class SalePayDebtAPIView(MarketCashierOnlyMixin, CompanyBranchRestrictedMixin, A
                     return Response(
                         {"detail": "Смена закрыта.", "code": "shift_closed"}, status=status.HTTP_400_BAD_REQUEST
                     )
-                if _req.cashier_id != request.user.id and not _is_owner_like(request.user):
+                if _req.cashier_id != request.user.id and not may_use_foreign_shift(request, request.user, _is_owner_like(request.user)):
                     return Response(
                         {"detail": "Эта смена открыта другим кассиром.", "code": "shift_not_owned"},
                         status=status.HTTP_403_FORBIDDEN,

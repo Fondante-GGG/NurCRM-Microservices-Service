@@ -50,6 +50,16 @@ def parse_client(request):
     return result
 
 
+def is_kassa(request):
+    """Запрос с кассы (X-NurMarket-Client: kassa/…)."""
+    return parse_client(request)[0] == "kassa"
+
+
+def may_use_foreign_shift(request, user, owner_like):
+    """ТЗ 31.10 п.7: чужая смена — только владельцу/админу из веб-админки; с кассы — никому (shift_not_owned)."""
+    return bool(owner_like) and not is_kassa(request)
+
+
 def client_label(request):
     kind, ver = parse_client(request)
     return f"{kind}/{'.'.join(map(str, ver))}" if kind else ""

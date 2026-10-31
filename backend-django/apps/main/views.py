@@ -1,3 +1,4 @@
+from core.api_compat import may_use_foreign_shift
 from apps.main.services_debt import debt_detached_client as _debt_detached_client  # ТЗ 29.10 Б-13
 from apps.integrations.idempotency import idempotent
 from decimal import Decimal, ROUND_CEILING, ROUND_HALF_UP, InvalidOperation
@@ -193,7 +194,7 @@ def _receipt_drawer_shift(request, company):
     if shift.status != CashShift.Status.OPEN:
         raise ValidationError({"code": "shift_closed", "detail": "Смена уже закрыта."})
     user = request.user
-    if shift.cashier_id != user.id and getattr(user, "role", "") not in ("owner", "admin"):
+    if shift.cashier_id != user.id and not may_use_foreign_shift(request, user, getattr(user, "role", "") in ("owner", "admin")):
         raise PermissionDenied({"code": "shift_not_owned", "detail": "Это смена другого кассира."})
     return shift
 
@@ -4458,7 +4459,7 @@ class ClientDealsPayAnyAPIView(APIView, CompanyBranchRestrictedMixin):
                     {"detail": "Смена закрыта.", "code": "shift_closed"},
                     status=status.HTTP_400_BAD_REQUEST,
                 )
-            if shift.cashier_id != user.id and not _is_owner_like(user):
+            if shift.cashier_id != user.id and not may_use_foreign_shift(request, user, _is_owner_like(user)):
                 return Response(
                     {"detail": "Эта смена открыта другим кассиром.", "code": "shift_not_owned"},
                     status=status.HTTP_403_FORBIDDEN,

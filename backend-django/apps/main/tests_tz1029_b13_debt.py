@@ -185,6 +185,15 @@ class ClientPayDebtCodesTests(B13Base):
         self.assertEqual(r.status_code, 403)
         self.assertEqual(r.json()["code"], "shift_not_owned")
 
+    def test_owner_from_kassa_cannot_use_cashier_shift(self):
+        # ТЗ 31.10 п.7: владелец с кассы в смену кассира — 403; из веб-админки (без заголовка кассы) — можно
+        cs = self.shift(self.cashier)
+        r = self.pay(shift=str(cs.id), hdr=STRICT)
+        self.assertEqual(r.status_code, 403)
+        self.assertEqual(r.json()["code"], "shift_not_owned")
+        r = self.pay(shift=str(cs.id))
+        self.assertEqual(r.status_code, 200, r.content[:300])
+
     def test_cashbox_not_found(self):
         self.assertEqual(self.pay(cashbox=str(uuid.uuid4())).json()["code"], "cashbox_not_found")
 
@@ -293,6 +302,13 @@ class CheckoutShiftCodesTests(B13Base):
             r = self._checkout(self.capi, hdr, shift=str(sh.id))
             self.assertEqual(r.status_code, 400)
             self.assertEqual(r.json()["code"], "shift_closed")
+
+    def test_owner_checkout_from_kassa_in_cashier_shift(self):
+        # ТЗ 31.10 п.7: чек владельца с кассы в смену кассира — 403 shift_not_owned
+        cs = self.shift(self.cashier)
+        r = self._checkout(self.api, STRICT, shift=str(cs.id))
+        self.assertEqual(r.status_code, 403)
+        self.assertEqual(r.json()["code"], "shift_not_owned")
 
     def test_foreign_shift_code_and_status(self):
         foreign = self.shift(self.owner)
