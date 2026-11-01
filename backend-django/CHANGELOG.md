@@ -2,6 +2,14 @@
 
 Новые записи сверху. Единое ТЗ бэкенду 26.10.2026, разделы 8–11 (Б-52…Б-87).
 
+## 01.11.2026 — ТЗ Умару: чат на витрине и ИИ-помощник (пункты 5–9)
+- ИИ-помощник витрины (`apps/inbox/assistant.py`): `POST …/chat/sessions/{id}/assistant/`. Ключ Gemini — только ключ самого магазина (настройки его бота), общего ключа NurCRM нет, в ответах ключа нет. Функции `search_products`, `get_product`, `get_size_chart`, `get_shop_info`, `add_to_cart`, `handoff`; ответ с карточками товаров и строкой корзины для фронта. Сверка чисел с данными функций того же хода: расхождение → «Уточню у продавца.» и `hallucination_blocked` в журнале ходов.
+- Защита: Turnstile при создании сеанса (env `TURNSTILE_SECRET_KEY`, нет — пропуск с предупреждением), лимиты 6/мин и 40/сутки на сеанс, 120/сутки на IP, потолок магазина `daily_cap`, кэш одинаковых вопросов 10 мин, выключатели (магазин и глобально `SHOWCASE_ASSISTANT_DISABLED=1`), журнал ходов `AssistantTurn`.
+- «Правила магазина» (`knowledge`, до 2000 символов, ru/ky/en/uz/kk) и настройки помощника владельца: `GET/PUT api/main/inbox/assistant/settings/`, «Проверить помощника» `POST api/main/inbox/assistant/test/`.
+- Согласие на телефон `POST …/consent/` (журнал `ChatConsentLog`), «Удалить мой чат» `DELETE …/sessions/{id}/`, `manage.py purge_showcase_chats` (90 дней, повторный запуск безопасен).
+- Чат под `api/main/public/companies/{slug}/chat/…` (то же, что `api/inbox/public/…`); `/start w_<токен>` склеивает сеанс с контактом Telegram (`WidgetSession.tg_contact`), бот не принимает метку за телефон.
+- capabilities: `showcase_chat`, `showcase_assistant`. Миграция: inbox 0002_showcase_assistant (лёгкая, новые таблицы).
+
 ## 31.10.2026 — ТЗ «Редактор накладных закупок» (30.10), вариант А
 - `PATCH api/main/suppliers/receipts/{id}/` по подробному ТЗ: обязательный `Idempotency-Key` (повтор → `replayed: true`), `If-Match`/`version`, `reason` 5–500 + `reason_code`, `dry_run`, `lines` (старое `items` понимаем), `update_product_purchase_price`, `supplier_id`, `payment`, `source`, `device`. Ответ `{receipt, deltas, movements, warnings, replayed}`. Коды по таблице 3.2 через ApiError (`{code, detail, data}`): 412/409 version_conflict, 423 period_closed, построчный has_returns, receipt_fully_returned, negative_stock с min_qty, debt_already_paid, 422 validation_error/fractional_not_allowed.
 - Остатки — движение `receipt_correction` на каждую строку; закупка в карточке по правилу (удалили последний приход товара — откат к прошлому); оплаченный приход — сторно/доплата в ту же кассу (закрытая смена → основная касса, `shift_closed_money_to_main`); смена поставщика/оплаты — если не было возвратов и оплат долга.
