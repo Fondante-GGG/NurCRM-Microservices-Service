@@ -200,11 +200,12 @@ PURCHASE_EDIT_FIELD = "can_edit_purchase_documents"
 
 
 def can_edit_purchase_documents(user) -> bool:
-    """Владелец компании — всегда да; остальные (и админ) — только явно выданное владельцем True."""
+    """Владелец и администратор — всегда да; остальные — только явно выданное (владельцем или админом) True.
+    01.11 (Умар): у кого право есть — правит любые приходы без ограничения по времени, пока право не снимут."""
     if user is None or not getattr(user, "is_authenticated", False):
         return False
     from apps.warehouse.op_permissions import is_company_owner
 
-    if is_company_owner(user):
+    if is_company_owner(user) or getattr(user, "role", None) == "admin":
         return True
     return getattr(user, PURCHASE_EDIT_FIELD, None) is True

@@ -103,7 +103,10 @@ _Z = Decimal("0")
 # ------------------------------------------------------------------ настройки и право
 
 def receipt_edit_window(company) -> str:
-    """Действующее окно правки компании (company — объект или id)."""
+    """Действующее окно правки компании (company — объект или id).
+    01.11 (Умар): срока больше нет — у кого есть право, правит без ограничения по времени. Всегда "always";
+    настройка Company.receipt_edit_window хранится, но не действует."""
+    return "always"
     from apps.users.models import Company, CompanyAppSettings
 
     if not isinstance(company, Company):

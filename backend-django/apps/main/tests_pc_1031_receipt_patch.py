@@ -78,14 +78,14 @@ class ReceiptPatchTests(ReceiptEditBase):
         self.assertEqual((d["version"], r["ETag"], d["edited"], d["edit_count"]), (1, '"1"', False, 0))
         self.assertTrue(d["can_edit"])
         self.assertIsNone(d["edit_block_reason"])
-        self.assertEqual(d["edit_window"], "24h")
-        self.assertIsNotNone(d["edit_window_until"])
+        self.assertEqual(d["edit_window"], "always")
+        self.assertIsNone(d["edit_window_until"])
         self.assertEqual((d["payment_type"], d["debt_amount"], d["deal_id"]), ("debt", "100.00", str(self.deal.id)))
         self.assertEqual(d["lines"][0]["qty"], 10)  # целое — числом, как раньше
         self.assertEqual(d["lines"][0]["returned_qty"], "0")
         lst = self.api.get("/api/main/suppliers/receipts/").data["results"][0]
         self.assertIn("can_edit", lst)
-        _, admin = self.user(role="admin")
+        _, admin = self.user()
         d = admin.get(self.url).data
         self.assertEqual((d["can_edit"], d["edit_block_reason"]), (False, "permission_denied"))
 
@@ -320,22 +320,12 @@ class ReceiptPatchErrorTests(ReceiptEditBase):
         self.assertEqual(r.data["data"]["closed_until"], timezone.localdate().isoformat())
 
     def test_edit_window(self):
-        SupplierReceipt.objects.filter(pk=self.rid).update(created_at=timezone.now() - timedelta(hours=25))
-        r = self.patch({"comment": "x"})
-        self.assertEqual(self.code(r, 409), "edit_window_expired")
-        self.assertEqual(r.data["data"]["window"], "24h")
-        self.assertTrue(r.data["data"]["created_at"] and r.data["data"]["expired_at"])
-        self.assertEqual(self.api.get(self.url).data["edit_block_reason"], "edit_window_expired")
-        # запасное значение — вчерашняя настройка в app-settings кассы
-        CompanyAppSettings.objects.create(company=self.company, app="nurmarket-mobile",
-                                          settings={"receipt_edit_window": "48h"})
-        self.assertEqual(self.patch({"comment": "x"}).status_code, 200)
-        # настройка компании важнее
+        # 01.11: у кого есть право — правит без ограничения по времени (даже если в компании записано 24h)
         Company.objects.filter(pk=self.company.pk).update(receipt_edit_window="24h")
-        self.assertEqual(self.code(self.patch({"comment": "y"}), 409), "edit_window_expired")
-        Company.objects.filter(pk=self.company.pk).update(receipt_edit_window="always")
         SupplierReceipt.objects.filter(pk=self.rid).update(created_at=timezone.now() - timedelta(days=20))
-        self.assertEqual(self.patch({"comment": "z"}).status_code, 200)
+        self.assertEqual(self.patch({"comment": "x"}).status_code, 200)
+        d = self.api.get(self.url).data
+        self.assertEqual((d["edit_window"], d["edit_window_until"], d["edit_block_reason"]), ("always", None, None))
 
     def test_validation_and_fractional(self):
         r = self.patch({"lines": [{"id": str(self.item.id), "qty": 0}]})
@@ -469,49 +459,41 @@ class ReceiptVersionsTests(ReceiptEditBase):
 
 class ReceiptEditAccessTests(ReceiptEditBase):
     def test_only_owner_by_default(self):
+        # 01.11: владелец и администратор — всегда; остальные — только с выданным правом
         _, admin = self.user(role="admin")
-        r = self.patch({"comment": "x"}, api=admin)
+        self.assertEqual(self.patch({"comment": "x"}, api=admin).status_code, 200)
+        _, emp = self.user()
+        r = self.patch({"comment": "x"}, api=emp)
         self.assertEqual(self.code(r, 403), "permission_denied")
         self.assertEqual(r.data["data"]["required"], "can_edit_purchase_documents")
-        _, emp = self.user()
-        self.assertEqual(self.code(self.patch({"comment": "x"}, api=emp), 403), "permission_denied")
         _, granted = self.user(can_edit_purchase_documents=True)
         self.assertEqual(self.patch({"comment": "x"}, api=granted).status_code, 200)
 
     def test_right_granted_only_by_owner(self):
-        target, _ = self.user()
+        # 01.11: право выдают и снимают владелец или администратор; простой сотрудник — нет
+        target, tapi = self.user()
         _, admin = self.user(role="admin")
+        _, emp = self.user()
         url = f"/api/users/employees/{target.id}/"
+        self.assertEqual(emp.patch(url, {"can_edit_purchase_documents": True}, format="json").status_code in (400, 403), True)
         r = admin.patch(url, {"can_edit_purchase_documents": True}, format="json")
-        self.assertEqual(r.status_code, 400, r.data)
-        r = self.api.patch(url, {"can_edit_purchase_documents": True}, format="json")
         self.assertEqual(r.status_code, 200, r.data)
         self.assertTrue(r.data["can_edit_purchase_documents"])
-        rows = {str(u["id"]): u for u in self.api.get("/api/users/employees/").data.get("results", [])} or {
-            str(u["id"]): u for u in self.api.get("/api/users/employees/").data}
-        self.assertTrue(rows[str(target.id)]["can_edit_purchase_documents"])
-        self.assertTrue(self.api.get("/api/users/profile/").data["can_edit_purchase_documents"])  # владелец
-        self.assertFalse(admin.get("/api/users/profile/").data["can_edit_purchase_documents"])
-        # сам себе выдать нельзя
-        _, emp = self.user()
-        self.assertEqual(emp.patch("/api/users/profile/", {"can_edit_purchase_documents": True},
-                                   format="json").status_code, 400)
+        target.refresh_from_db(); tapi.force_authenticate(target)
+        self.assertEqual(self.patch({"comment": "x"}, api=tapi).status_code, 200)
+        r = self.api.patch(url, {"can_edit_purchase_documents": False}, format="json")
+        self.assertEqual(r.status_code, 200, r.data)
+        self.assertFalse(r.data["can_edit_purchase_documents"])
+        target.refresh_from_db(); tapi.force_authenticate(target)
+        self.assertEqual(self.code(self.patch({"comment": "y"}, api=tapi), 403), "permission_denied")
+        self.assertTrue(self.api.get("/api/users/profile/").data["can_edit_purchase_documents"])
+        self.assertTrue(admin.get("/api/users/profile/").data["can_edit_purchase_documents"])
 
     def test_window_changed_only_by_owner(self):
-        _, admin = self.user(role="admin")
-        self.assertEqual(self.api.get("/api/users/company/").data["receipt_edit_window"], "24h")
-        r = admin.patch("/api/users/company/", {"receipt_edit_window": "48h"}, format="json")
-        self.assertIn(r.status_code, (403,), r.data)
-        r = admin.patch("/api/users/settings/company/", {"receipt_edit_window": "48h"}, format="json")
-        self.assertEqual(self.code(r, 403), "permission_denied")
-        r = self.api.patch("/api/users/company/", {"receipt_edit_window": "always"}, format="json")
-        self.assertEqual(r.status_code, 200, r.data)
-        self.assertEqual(r.data["receipt_edit_window"], "always")
-        self.assertTrue(r.data["receipt_edit_window_editable"])
-        self.assertEqual(self.code(self.api.patch("/api/users/company/", {"receipt_edit_window": "12h"},
-                                                  format="json"), 400), "validation_error")
-        self.assertFalse(admin.get("/api/users/company/").data["receipt_edit_window_editable"])
-
+        # 01.11: срока правки больше нет — всегда "always", настройку не меняют
+        d = self.api.get("/api/users/company/").data
+        self.assertEqual(d["receipt_edit_window"], "always")
+        self.assertFalse(d["receipt_edit_window_editable"])
 
 class ReceiptHistoryAliasTests(ReceiptEditBase):
     def test_history_is_alias_of_versions(self):
@@ -616,7 +598,7 @@ class ReceiptDiscountEditTests(ReceiptEditBase):
         self.assertEqual(self.item.purchase_price, Decimal("10.0000"))
 
     def test_discount_permission_and_reason_rules_apply(self):
-        _, admin = self.user(role="admin")
+        _, admin = self.user()
         self.assertEqual(self.code(self.patch({"discount": "5"}, api=admin), 403), "permission_denied")
         self.assertEqual(self.code(self.patch({"discount": "5", "reason": ""}), 400), "reason_required")
 
@@ -679,6 +661,6 @@ class ReceiptSalePriceEditTests(ReceiptEditBase):
         self.assertEqual(self.p.price, Decimal("20.00"))  # откат документа карточку товара не трогает
 
     def test_sale_price_permission(self):
-        _, admin = self.user(role="admin")
+        _, admin = self.user()
         r = self.patch({"lines": [{"id": str(self.item.id), "sale_price": "20"}]}, api=admin)
         self.assertEqual(self.code(r, 403), "permission_denied")

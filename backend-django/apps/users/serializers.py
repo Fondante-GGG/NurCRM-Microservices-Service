@@ -324,15 +324,15 @@ def _purchase_edit_effective(user):
 
 
 def _check_purchase_edit_grant(data, instance, current_user):
-    """Право «Редактор документов закупок» выдаёт/снимает только владелец (сравниваем действующее значение)."""
+    """Право «Редактор документов закупок» выдаёт/снимает владелец или администратор (01.11)."""
     from apps.warehouse.op_permissions import is_company_owner
 
     key = "can_edit_purchase_documents"
     if key not in data or current_user is None:
         return
     before = _purchase_edit_effective(instance) if instance is not None else False
-    if bool(data[key]) != before and not is_company_owner(current_user):
-        raise serializers.ValidationError({key: "Это право может выдать только владелец компании."})
+    if bool(data[key]) != before and not (is_company_owner(current_user) or getattr(current_user, "role", None) == "admin"):
+        raise serializers.ValidationError({key: "Это право может выдать только владелец или администратор."})
     if data[key] is False:
         data[key] = None  # «нет» хранится как NULL (по умолчанию нет)
 
@@ -1370,7 +1370,7 @@ class CompanySerializer(serializers.ModelSerializer):
         from apps.warehouse.op_permissions import is_company_owner
 
         data["receipt_edit_window"] = receipt_edit_window(instance)
-        data["receipt_edit_window_editable"] = bool(user is not None and is_company_owner(user))
+        data["receipt_edit_window_editable"] = False  # 01.11: срока правки больше нет, настройка не действует
 
         return data
 
