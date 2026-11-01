@@ -3224,7 +3224,7 @@ class SaleItem(models.Model):
     def line_total(self) -> Decimal:
         base = Decimal(self.unit_price or 0) * Decimal(self.quantity or 0)
         disc = Decimal(getattr(self, "line_discount", None) or 0)
-        return (base - disc).quantize(Decimal("0.01"))
+        return (base - disc).quantize(_Q2, rounding=ROUND_HALF_UP)  # ТЗ 01.11: 0.005 -> 0.01, не банковское
 
     @property
     def amount(self) -> Decimal:

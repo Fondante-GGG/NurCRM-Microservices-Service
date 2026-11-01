@@ -521,3 +521,29 @@ class BranchTransferBaseTest(TestCase):
         res_del_fail = self.client.delete(f"/users/branches/{branch_with_stock.id}/")
         self.assertEqual(res_del_fail.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertIn("Нельзя удалить филиал", res_del_fail.data["detail"])
+
+
+class BranchTransferBodyIdempotencyTests(BranchTransferBaseTest):
+    """ТЗ 01.11: идемпотентность и по заголовку, и по idempotency_key в теле."""
+
+    def _payload(self, **extra):
+        p = {"from_branch": None, "to_branch": str(self.branch_osh.id), "date": timezone.localdate().isoformat(),
+             "items": [{"product": str(self.main_product.id), "quantity": 5}]}
+        p.update(extra)
+        return p
+
+    def test_body_key_repeat_returns_same_transfer(self):
+        a = self.client.post("/main/branch-transfers/", self._payload(idempotency_key="bt-body-1"), format="json")
+        b = self.client.post("/main/branch-transfers/", self._payload(idempotency_key="bt-body-1"), format="json")
+        self.assertEqual(a.status_code, 201, a.data)
+        self.assertEqual(a.data["id"], b.data["id"])
+        self.assertEqual(BranchTransfer.objects.filter(idempotency_key="bt-body-1").count(), 1)
+        self.main_product.refresh_from_db()
+        self.assertEqual(self.main_product.quantity, Decimal("95.000"))  # списано один раз
+
+    def test_header_key_repeat_returns_same_transfer(self):
+        a = self.client.post("/main/branch-transfers/", self._payload(), format="json", HTTP_IDEMPOTENCY_KEY="bt-h-1")
+        b = self.client.post("/main/branch-transfers/", self._payload(), format="json", HTTP_IDEMPOTENCY_KEY="bt-h-1")
+        self.assertEqual(a.data["id"], b.data["id"])
+        self.main_product.refresh_from_db()
+        self.assertEqual(self.main_product.quantity, Decimal("95.000"))
