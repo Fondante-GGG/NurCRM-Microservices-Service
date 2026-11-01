@@ -776,6 +776,9 @@ def handle_customer_message(
             # ТЗ 01.11: карточка товара с сайта (/start p_<id>)
             reply_text = "Вы открыли товар с сайта."
             after_start = lambda: start_product_card(settings, token, chat_id, company, start_arg[2:])
+        elif re.match(r"^w_[A-Za-z0-9_-]{20,40}$", start_arg):
+            # ТЗ 01.11: продолжение чата витрины (/start w_<токен>) — склейка в inbox, не телефон и не id клиента
+            reply_text = "Здравствуйте! Продолжаем разговор из чата на сайте. Напишите ваш вопрос."
         elif len(parts) > 1 and parts[1].strip():
             # /start <client_id>
             reply_text = link_client_by_start(company, chat_id, parts[1].strip())

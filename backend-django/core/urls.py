@@ -55,6 +55,7 @@ apps_includes = [
     # Стоят ПЕРЕД apps.main.urls и apps.construction.urls намеренно — перекрывают старые пути.
     path('main/', include('apps.possync.urls')),
     path('construction/', include('apps.possync.urls_construction')),
+    path('main/', include('apps.inbox.showcase_urls')),  # чат и ИИ-помощник витрины: main/public/companies/{slug}/chat/
     path('main/', include('apps.main.urls')),
     path('users/', include('apps.main.tz26.users_urls')),  # ТЗ 26.10 Б-70: устройства компании
     path('main/inbox/', include('apps.inbox.urls')),  # ТЗ 26.10 Б-73…Б-87: ящик «Чаты»

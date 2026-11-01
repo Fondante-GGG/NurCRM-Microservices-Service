@@ -7,7 +7,8 @@ from django.db.models import Q
 
 AUTH_USER = _dj_settings.AUTH_USER_MODEL
 
-__all__ = ["AiRun", "WidgetSettings", "WidgetSession", "QuickReply", "WaTemplate", "Campaign", "CampaignRecipient", "DealExt"]
+__all__ = ["AiRun", "WidgetSettings", "WidgetSession", "QuickReply", "WaTemplate", "Campaign", "CampaignRecipient", "DealExt",
+           "AssistantSettings", "AssistantTurn", "ChatConsentLog"]
 
 
 class AiRun(models.Model):
@@ -67,6 +68,9 @@ class WidgetSession(models.Model):
     ip = models.CharField(max_length=64, blank=True, default="", db_index=True)
     spam = models.BooleanField(default=False)
     link_token = models.CharField(max_length=40, null=True, blank=True, unique=True)  # для t.me/<бот>?start=w_<токен>
+    # Telegram-контакт, к которому склеен посетитель (после /start w_<токен>)
+    tg_contact = models.ForeignKey("inbox.ChannelContact", on_delete=models.SET_NULL, null=True, blank=True,
+                                   related_name="+")
     page = models.CharField(max_length=300, blank=True, default="")
     created_at = models.DateTimeField(auto_now_add=True, db_index=True)
 
@@ -184,3 +188,50 @@ class DealExt(models.Model):
         app_label = "inbox"
         constraints = [models.UniqueConstraint(fields=["company", "external_id"], condition=~Q(external_id=""),
                                                name="uq_inbox_dealext_external")]
+
+
+class AssistantSettings(models.Model):
+    """ИИ-помощник витрины (ТЗ 01.11, п. 6–8). Ключ Gemini — ТОЛЬКО ключ самого магазина (настройки его бота)."""
+
+    company = models.OneToOneField("users.Company", on_delete=models.CASCADE, related_name="+")
+    enabled = models.BooleanField(default=False)
+    daily_cap = models.PositiveIntegerField(default=500)  # потолок вызовов в сутки на магазин (0 = без потолка нельзя)
+    knowledge = models.JSONField(default=dict, blank=True)  # «Правила магазина»: {ru, ky, en, uz, kk} до 2000 символов
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        app_label = "inbox"
+
+
+class AssistantTurn(models.Model):
+    """Журнал ходов помощника: токены, вызванные функции, признак блокировки."""
+
+    company = models.ForeignKey("users.Company", on_delete=models.CASCADE, related_name="+")
+    session = models.ForeignKey("inbox.WidgetSession", on_delete=models.SET_NULL, null=True, blank=True,
+                                related_name="assistant_turns")
+    ip = models.CharField(max_length=64, blank=True, default="")
+    question = models.CharField(max_length=500, blank=True, default="")
+    outcome = models.CharField(max_length=24, default="answered")  # answered|cached|busy|unavailable|handoff|error
+    tokens = models.PositiveIntegerField(default=0)
+    tools = models.JSONField(default=list, blank=True)
+    blocked = models.CharField(max_length=32, blank=True, default="")  # hallucination_blocked
+    counted = models.BooleanField(default=True)  # идёт в лимиты (busy/unavailable не считаются)
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        app_label = "inbox"
+        indexes = [models.Index(fields=["company", "created_at"]), models.Index(fields=["ip", "created_at"])]
+
+
+class ChatConsentLog(models.Model):
+    """Согласие посетителя на передачу телефона продавцу (журнал)."""
+
+    company = models.ForeignKey("users.Company", on_delete=models.CASCADE, related_name="+")
+    session = models.ForeignKey("inbox.WidgetSession", on_delete=models.SET_NULL, null=True, blank=True, related_name="+")
+    kind = models.CharField(max_length=24, default="phone_to_seller")
+    consent = models.BooleanField(default=True)
+    ip = models.CharField(max_length=64, blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        app_label = "inbox"

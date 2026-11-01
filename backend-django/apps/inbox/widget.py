@@ -186,7 +186,7 @@ def poll(session, after, wait_seconds):
         time.sleep(1)
 
 
-def save_contact(session, name, phone, consent, w: WidgetSettings):
+def save_contact(session, name, phone, consent, w: WidgetSettings, ip=""):
     contact = session.contact
     phone = (phone or "").strip()
     if phone and consent is not True:
@@ -205,6 +205,8 @@ def save_contact(session, name, phone, consent, w: WidgetSettings):
         contact.save(update_fields=changed)
     if phone:
         contacts_svc.set_consents(contact, service=True, source="widget")
+        from . import assistant
+        assistant.log_consent(session, ip)
         contacts_svc.auto_link(contact)  # телефон → автосвязь с клиентом (Б-74)
     return contact
 

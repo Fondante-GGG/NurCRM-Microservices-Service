@@ -50,9 +50,23 @@ def get_or_create_contact(channel, external_id, *, display_name="", username="",
         changed.append("phone")
     if changed:
         contact.save(update_fields=changed)
+    bind_widget_session(contact, start_payload)
     if not contact.client_id and (created or start_payload or phone):
         auto_link(contact, start_payload=start_payload)
     return contact, created
+
+
+def bind_widget_session(contact, start_payload=""):
+    """/start w_<токен>: склеить сеанс чата витрины с этим контактом Telegram (Б-83 п. 5)."""
+    wm = WIDGET_START.match((start_payload or "").strip())
+    if not wm:
+        return None
+    from .models import WidgetSession
+    ws = WidgetSession.objects.filter(link_token=wm.group(1), company_id=contact.company_id).first()
+    if ws and ws.tg_contact_id != contact.id:
+        ws.tg_contact = contact
+        ws.save(update_fields=["tg_contact"])
+    return ws
 
 
 def auto_link(contact, start_payload=""):

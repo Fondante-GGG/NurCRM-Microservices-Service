@@ -36,6 +36,8 @@ FEATURES = (
     "receipt_edit_sale_price",  # 01.11: PATCH прихода — цена продажи строки (sale_price)
     # ТЗ 01.11 (витрина): Telegram-блок в публичном дизайне, ссылка на корзину c_<token>, source_detail у заказов
     "showcase_telegram", "showcase_cart_link", "showcase_order_source_detail",
+    # ТЗ 01.11: чат на витрине (web_widget, согласие, удаление чата) и ИИ-помощник витрины с ключом магазина
+    "showcase_chat", "showcase_assistant",
 )
 
 
