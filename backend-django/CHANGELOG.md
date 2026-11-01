@@ -2,6 +2,16 @@
 
 Новые записи сверху. Единое ТЗ бэкенду 26.10.2026, разделы 8–11 (Б-52…Б-87).
 
+## 01.11.2026 — Витрина P0 (ветка feature/showcase-p0)
+- Публичный дизайн: блок `telegram` `{enabled, url, product_url_template, placement, label}` (бот server + webhook + `cart.telegram.enabled`; токена нет). Ключи дизайна `cart.telegram.*`.
+- Заказ витрины: `source_detail`, `source=web_chat`, `cart_token` (один токен — один заказ, повтор → 200), фильтр `?source_detail=`; поля в списке и карточке.
+- `POST public/companies/{slug}/cart-link/` → `{token}` (7 дней, 20/час с IP); бот: `/start c_<token>` (корзина по ценам из базы, оформление) и `/start p_<id>` (карточка товара).
+- События `assistant_open`, `assistant_message`, `telegram_click`, `cart_link` + счётчики в статистике.
+- Ключ дизайна `shop.info.knowledge` (закрытый, ru/ky/en/uz/kk, до 2000) и `get_shop_knowledge(company, lang)`.
+- Касса: `SaleItem.line_total` и `cart_service._money` — ROUND_HALF_UP; `branch-transfers/` принимает `idempotency_key` в теле; `debt_adjustment.remaining_debt` при возврате долговой продажи = до − погашено.
+- capabilities: `showcase_telegram`, `showcase_cart_link`, `showcase_order_source_detail`.
+- Миграция: main 0171_showcase_p0_1101. Описание: docs/showcase-p0-2026-11-01.md.
+
 ## 31.10.2026 — ТЗ «Редактор накладных закупок» (30.10), вариант А
 - `PATCH api/main/suppliers/receipts/{id}/` по подробному ТЗ: обязательный `Idempotency-Key` (повтор → `replayed: true`), `If-Match`/`version`, `reason` 5–500 + `reason_code`, `dry_run`, `lines` (старое `items` понимаем), `update_product_purchase_price`, `supplier_id`, `payment`, `source`, `device`. Ответ `{receipt, deltas, movements, warnings, replayed}`. Коды по таблице 3.2 через ApiError (`{code, detail, data}`): 412/409 version_conflict, 423 period_closed, построчный has_returns, receipt_fully_returned, negative_stock с min_qty, debt_already_paid, 422 validation_error/fractional_not_allowed.
 - Остатки — движение `receipt_correction` на каждую строку; закупка в карточке по правилу (удалили последний приход товара — откат к прошлому); оплаченный приход — сторно/доплата в ту же кассу (закрытая смена → основная касса, `shift_closed_money_to_main`); смена поставщика/оплаты — если не было возвратов и оплат долга.
