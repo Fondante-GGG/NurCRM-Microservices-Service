@@ -620,6 +620,84 @@ def clear_customer_history(company_id, chat_id) -> None:
         pass
 
 
+def start_cart_link(token, chat_id, company, link_token: str, from_user: dict) -> None:
+    """ТЗ 01.11: /start c_<token> — показать корзину сайта (названия/цены из базы) и дать оформить заказ."""
+    from apps.main.models import ShowcaseCartLink, ShowcaseOrder, Product, ProductVariant
+    from apps.main.telegram_bot.services.callback_handler import _send_order_summary
+    from apps.main.variant_utils import name_with_variant, variant_prices
+    from django.core.cache import cache
+    import uuid as _uuid
+
+    done = ShowcaseOrder.objects.filter(company=company, cart_token=link_token).first()
+    if done:
+        telegram_api.send_message(token, chat_id, f"Этот заказ уже оформлен: №{done.number}.")
+        return
+    link = ShowcaseCartLink.objects.filter(company=company, token=link_token).first()
+    if link is None or link.expires_at < timezone.now():
+        telegram_api.send_message(token, chat_id, "Ссылка на корзину устарела. Соберите корзину на сайте заново.")
+        return
+    items, skipped = [], 0
+    for it in link.items or []:
+        prod = Product.objects.filter(company=company, id=it.get("product")).first()
+        if prod is None:
+            skipped += 1
+            continue
+        variant = None
+        if it.get("variant"):
+            variant = ProductVariant.objects.filter(id=it["variant"], product=prod, is_active=True).first()
+            if variant is None:
+                skipped += 1
+                continue
+        price = variant_prices(variant, prod)[0] if variant is not None else (prod.price or 0)
+        items.append({
+            "product_id": str(prod.id),
+            "variant_id": str(variant.id) if variant is not None else None,
+            "title": name_with_variant(prod.name, variant),
+            "price": str(price),
+            "qty": str(it.get("qty") or "1"),
+        })
+    if not items:
+        telegram_api.send_message(token, chat_id, "Товары из корзины больше недоступны.")
+        return
+    if skipped:
+        telegram_api.send_message(token, chat_id, "Часть товаров из корзины больше недоступна, они убраны.")
+    draft_id = f"d_{_uuid.uuid4().hex[:8]}"
+    draft = {
+        "items": items,
+        "delivery_type": "pickup",
+        "user_name": f"{from_user.get('first_name', '')} {from_user.get('last_name', '')}".strip() or from_user.get("username", "Покупатель"),
+        "phone": "",
+        "cart_token": link_token,
+    }
+    cache.set(f"tg_draft:{company.id}:{draft_id}", draft, timeout=3600)
+    _send_order_summary(token, chat_id, company, draft_id, draft)
+
+
+def start_product_card(settings, token, chat_id, company, product_id: str) -> None:
+    """ТЗ 01.11: /start p_<id> — карточка товара с кнопками «в корзину / оформить»."""
+    from apps.main.models import Product
+    from apps.main.telegram_bot.services.callback_handler import make_product_card_markup
+    from apps.main.telegram_bot.services.photo_service import format_price_display, send_single_product_photo
+
+    try:
+        prod = Product.objects.filter(company=company, id=product_id).prefetch_related("variants").first()
+    except Exception:
+        prod = None
+    if prod is None:
+        telegram_api.send_message(token, chat_id, "Товар не найден. Откройте каталог: /catalog")
+        return
+    variants = [v for v in prod.variants.all() if v.is_active]
+    markup = make_product_card_markup(prod.id, has_variants=bool(variants), variants=variants)
+    try:
+        if send_single_product_photo(settings, chat_id, prod, reply_markup=markup):
+            return
+    except Exception:  # нет фото/поля — отправим текстом
+        logger.warning("product card photo failed for %s", prod.id)
+    telegram_api.send_message(
+        token, chat_id, f"<b>{html.escape(prod.name)}</b>\n💰 {format_price_display(prod.price)}",
+        parse_mode="HTML", reply_markup=markup)
+
+
 def handle_customer_message(
     settings,
     chat_id: str,
@@ -688,7 +766,17 @@ def handle_customer_message(
     # 3. Специальные команды покупателя и кнопки постоянного меню
     if lower_text.startswith("/start"):
         parts = norm.split(maxsplit=1)
-        if len(parts) > 1 and parts[1].strip():
+        start_arg = parts[1].strip() if len(parts) > 1 else ""
+        after_start = None
+        if re.match(r"^c_[A-Za-z0-9_-]{1,55}$", start_arg):
+            # ТЗ 01.11: корзина с сайта (/start c_<token>)
+            reply_text = "🧺 Корзина с сайта. Проверьте состав и подтвердите заказ."
+            after_start = lambda: start_cart_link(token, chat_id, company, start_arg[2:], from_user)
+        elif re.match(r"^p_[0-9a-fA-F-]{32,36}$", start_arg):
+            # ТЗ 01.11: карточка товара с сайта (/start p_<id>)
+            reply_text = "Вы открыли товар с сайта."
+            after_start = lambda: start_product_card(settings, token, chat_id, company, start_arg[2:])
+        elif len(parts) > 1 and parts[1].strip():
             # /start <client_id>
             reply_text = link_client_by_start(company, chat_id, parts[1].strip())
             linked_client = Client.objects.filter(company=company, telegram_chat_id=str(chat_id)).first()
@@ -712,6 +800,11 @@ def handle_customer_message(
             reply=reply_text,
             is_voice=is_voice,
         )
+        if after_start:
+            try:
+                after_start()
+            except Exception:
+                logger.exception("start deep link failed")
         return
 
     # Меню: Каталог

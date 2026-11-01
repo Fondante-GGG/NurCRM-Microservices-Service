@@ -32,6 +32,8 @@ FEATURES = (
     "receipt_patch",  # ТЗ 31.10 п.21: PATCH suppliers/receipts/{id}/ (dry_run, If-Match, коды ошибок)
     # ТЗ редактор накладных 30.10 (вариант А): PATCH с Idempotency-Key, версии/откат, деньги, receipt_changed
     "receipt_edit",
+    # ТЗ 01.11 (витрина): Telegram-блок в публичном дизайне, ссылка на корзину c_<token>, source_detail у заказов
+    "showcase_telegram", "showcase_cart_link", "showcase_order_source_detail",
 )
 
 

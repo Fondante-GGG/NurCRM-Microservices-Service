@@ -400,6 +400,18 @@ def published_document(company: Company, design: Optional[ShowcaseDesign] = None
     return doc
 
 
+def get_shop_knowledge(company: Company, lang: str = "ru") -> str:
+    """ТЗ 01.11: опубликованный текст design `shop.info.knowledge` для ИИ-ассистента. Нет языка — берём ru."""
+    try:
+        doc = published_document(company)
+    except Exception:
+        return ""
+    texts = (((doc.get("shop") or {}).get("info") or {}).get("knowledge")) or {}
+    if not isinstance(texts, dict):
+        return ""
+    return (texts.get(lang) or texts.get("ru") or "").strip()
+
+
 def apply_category_lists_from_doc(company: Company, doc: dict, touched_categories: dict):
     """PATCH categories.order / categories.hidden в документе → таблица настроек категорий."""
     valid = {
