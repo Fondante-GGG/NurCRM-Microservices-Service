@@ -118,6 +118,8 @@ class BranchTransferListCreateAPIView(generics.ListCreateAPIView):
 
     def create(self, request, *args, **kwargs):
         idempotency_key = request.headers.get("Idempotency-Key") or request.META.get("HTTP_IDEMPOTENCY_KEY")
+        if not idempotency_key and isinstance(request.data, dict):
+            idempotency_key = str(request.data.get("idempotency_key") or "").strip()[:128] or None  # ТЗ 01.11
         transfer = create_and_execute_branch_transfer(
             user=request.user,
             data=request.data,

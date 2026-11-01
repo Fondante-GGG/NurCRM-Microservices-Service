@@ -355,6 +355,15 @@ def handle_callback_query(settings, cq: dict) -> None:
             # Убираем кнопки со сводки (чтобы нельзя было подтвердить дважды)
             telegram_api.edit_message_reply_markup(token, chat_id, message_id, reply_markup={"inline_keyboard": []})
 
+            # ТЗ 01.11: корзина с сайта — один токен, один заказ (повтор показывает тот же заказ)
+            cart_token = draft_data.get("cart_token") or ""
+            if cart_token:
+                done = ShowcaseOrder.objects.filter(company=company, cart_token=cart_token).first()
+                if done:
+                    cache.delete(f"tg_draft:{company.id}:{draft_id}")
+                    telegram_api.send_message(token, chat_id, f"Этот заказ уже оформлен: №{done.number}.")
+                    return
+
             # Подтверждаем и создаём заказ
             items_raw = draft_data.get("items") or []
             if not items_raw:
@@ -409,7 +418,9 @@ def handle_callback_query(settings, cq: dict) -> None:
                         customer_name=cust_name,
                         customer_phone=phone,
                         delivery_type=del_type,
-                        source="telegram",
+                        source="telegram_bot" if cart_token else "telegram",
+                        source_detail="site_cart" if cart_token else "bot_catalog",
+                        cart_token=cart_token or None,
                         telegram_chat_id=str(chat_id),
                         comment=f"[Telegram chat_id={chat_id}]",
                         total=total_sum,
@@ -435,6 +446,11 @@ def handle_callback_query(settings, cq: dict) -> None:
                 telegram_api.send_message(token, chat_id, f"К сожалению, {exc} Заказ не может быть подтверждён.")
                 return
             except Exception as exc:
+                if cart_token:
+                    done = ShowcaseOrder.objects.filter(company=company, cart_token=cart_token).first()
+                    if done:  # гонка двойного нажатия
+                        telegram_api.send_message(token, chat_id, f"Этот заказ уже оформлен: №{done.number}.")
+                        return
                 logger.exception("Order confirmation failed: %s", exc)
                 telegram_api.send_message(token, chat_id, "Ошибка при создании заказа. Пожалуйста, обратитесь в магазин.")
                 return

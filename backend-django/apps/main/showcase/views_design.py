@@ -57,6 +57,7 @@ from apps.main.variant_utils import order_stock_lines, release_stock
 from apps.main.showcase.views_public_design import (  # noqa: F401
     PublicCompanyShowcaseDesignAPIView,
     PublicCompanyShowcaseOrderCreateAPIView,
+    PublicCompanyShowcaseCartLinkAPIView,
     PublicCompanyShowcaseTrackAPIView,
 )
 
@@ -801,6 +802,9 @@ class ShowcaseOrderListAPIView(ShowcaseErrorMixin, generics.ListAPIView):
         source_param = self.request.query_params.get("source")
         if source_param:
             qs = qs.filter(source=source_param)
+        detail_param = self.request.query_params.get("source_detail")
+        if detail_param:
+            qs = qs.filter(source_detail=detail_param)
 
         date_from = self.request.query_params.get("date_from")
         if date_from:
@@ -917,12 +921,15 @@ class ShowcaseStatsAPIView(EditorAPIView):
             raise ShowcaseFieldError("date_to", "Дата в формате ГГГГ-ММ-ДД.")
 
         total_views = total_atc = 0
+        ext = {"assistant_open": 0, "assistant_message": 0, "telegram_click": 0, "cart_link": 0}
         pv: Dict[str, int] = {}
         bc: Dict[str, int] = {}
         daily = []
         for st in ShowcaseStats.objects.filter(company=company, date__gte=date_from, date__lte=date_to).order_by("date"):
             total_views += st.views
             total_atc += st.add_to_cart
+            for k in ext:
+                ext[k] += getattr(st, k) or 0
             for pid, n in (st.product_views or {}).items():
                 pv[pid] = pv.get(pid, 0) + n
             for bid, n in (st.banner_clicks or {}).items():
@@ -952,6 +959,7 @@ class ShowcaseStatsAPIView(EditorAPIView):
             "date_to": date_to.isoformat(),
             "views": total_views,
             "add_to_cart": total_atc,
+            **ext,
             "orders": orders_count,
             "product_views": product_views,
             "banner_clicks": banner_clicks,

@@ -3818,7 +3818,9 @@ def adjust_sale_debt_on_return(
             else:
                 deal.save(update_fields=["amount", "auto_schedule", "updated_at"])
 
-        remaining_after = deal.remaining_debt
+        # Не deal.remaining_debt: при отмене сделки (kind=CANCELED) ClientDeal.save() стирает график
+        # взносов вместе с оплатами, и модельный расчёт даёт неверный остаток.
+        remaining_after = max(Decimal("0.00"), remaining_before - debt_reduce).quantize(Decimal("0.01"))
         if (is_full_return and deal.paid_total == 0) or deal.kind == ClientDeal.Kind.CANCELED:
             deal_status = "canceled"
         elif remaining_after <= 0:

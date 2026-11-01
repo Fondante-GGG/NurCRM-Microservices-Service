@@ -34,6 +34,8 @@ FEATURES = (
     "receipt_edit",
     "receipt_edit_discount",  # 01.11: PATCH прихода — скидка шапки (discount / discount_percent)
     "receipt_edit_sale_price",  # 01.11: PATCH прихода — цена продажи строки (sale_price)
+    # ТЗ 01.11 (витрина): Telegram-блок в публичном дизайне, ссылка на корзину c_<token>, source_detail у заказов
+    "showcase_telegram", "showcase_cart_link", "showcase_order_source_detail",
 )
 
 

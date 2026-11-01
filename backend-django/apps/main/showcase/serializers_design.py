@@ -336,6 +336,8 @@ class ShowcaseOrderSerializer(serializers.ModelSerializer):
             "comment",
             "total",
             "source",
+            "source_detail",
+            "cart_token",
             "telegram_chat_id",
             "sale",
             "stock_reserved",
@@ -344,7 +346,8 @@ class ShowcaseOrderSerializer(serializers.ModelSerializer):
             "created_at",
             "updated_at",
         ]
-        read_only_fields = ["id", "number", "total", "sale", "stock_reserved", "telegram_chat_id", "created_at", "updated_at"]
+        read_only_fields = ["id", "number", "total", "sale", "stock_reserved", "telegram_chat_id", "cart_token",
+                            "created_at", "updated_at"]
         extra_kwargs = {"pickup_code": {"required": False}}
 
     def validate_pickup_code(self, value):
@@ -375,6 +378,16 @@ class ShowcaseOrderDeliverySerializer(serializers.Serializer):
     address = serializers.CharField(max_length=255, required=False, allow_blank=True, default="")
 
 
+class ShowcaseCartLinkItemSerializer(serializers.Serializer):
+    product = serializers.UUIDField(required=True)
+    variant = serializers.UUIDField(required=False, allow_null=True, default=None)
+    qty = serializers.DecimalField(max_digits=12, decimal_places=3, min_value=Decimal("0.001"), max_value=Decimal("100000"))
+
+
+class ShowcaseCartLinkSerializer(serializers.Serializer):
+    items = serializers.ListField(child=ShowcaseCartLinkItemSerializer(), allow_empty=False, max_length=50)
+
+
 class ShowcaseOrderCreateSerializer(serializers.Serializer):
     customer = ShowcaseOrderCustomerSerializer(required=True)
     items = serializers.ListField(
@@ -387,7 +400,11 @@ class ShowcaseOrderCreateSerializer(serializers.Serializer):
     comment = serializers.CharField(required=False, allow_blank=True, default="", max_length=2000)
     # ТЗ Б-22: источник заказа; для telegram_bot — ещё telegram_chat_id
     source = serializers.ChoiceField(
-        choices=["showcase", "telegram_bot", "voice_ai", "whatsapp"], required=False, default="showcase", allow_blank=True)
+        choices=["showcase", "telegram_bot", "voice_ai", "whatsapp", "web_chat"], required=False, default="showcase",
+        allow_blank=True)
+    # ТЗ 01.11: деталь источника (site_cart, assistant, product_card, bot_catalog…) и токен ссылки на корзину
+    source_detail = serializers.RegexField(r"^[A-Za-z0-9_.-]{1,32}$", required=False, allow_blank=True, default="")
+    cart_token = serializers.RegexField(r"^[A-Za-z0-9_-]{1,55}$", required=False, allow_blank=True, default="")
     telegram_chat_id = serializers.RegexField(r"^-?\d{1,20}$", required=False, allow_blank=True, default="")
 
 

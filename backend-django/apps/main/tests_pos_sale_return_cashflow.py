@@ -1,5 +1,6 @@
 from decimal import Decimal
 import uuid
+from django.utils import timezone
 from django.test import TestCase
 from rest_framework.test import APIRequestFactory, force_authenticate
 from rest_framework.exceptions import ValidationError
@@ -726,3 +727,42 @@ class RefundMethodOverrideTests(POSSaleReturnCashflowTests):
             source_kind=CashFlow.SourceKind.POS_SALE_RETURN, source_id=str(sale.id)
         ):
             self.assertFalse(f.affects_shift_drawer)
+
+    def _debt_sale_with_paid_part(self, installments):
+        total = Decimal("3.00")
+        sale = Sale.objects.create(
+            company=self.company, branch=self.branch, cashbox=self.cashbox, shift=self.shift, user=self.cashier,
+            client=self.client, payment_method="debt", status=Sale.Status.DEBT,
+            subtotal=total, total=total, cash_received=Decimal("1.00"),
+        )
+        SaleItem.objects.create(
+            company=self.company, branch=self.branch, sale=sale, product=self.product,
+            unit_price=Decimal("3.00"), quantity=Decimal("1.00"), name_snapshot="Товар 3",
+        )
+        deal = ClientDeal.objects.create(
+            company=self.company, branch=self.branch, client=self.client, sale=sale, title="Долг",
+            kind=ClientDeal.Kind.DEBT, amount=total, prepayment=Decimal("1.00"), debt_days=30,
+        )
+        from apps.main.models import DealInstallment
+        DealInstallment.objects.filter(deal=deal).delete()
+        for n, (amount, paid) in enumerate(installments, start=1):
+            DealInstallment.objects.create(
+                deal=deal, number=n, due_date=timezone.localdate(), amount=Decimal(amount),
+                paid_amount=Decimal(paid), paid_on=timezone.localdate() if amount == paid else None,
+                balance_after=Decimal("0.00"),
+            )
+        return sale, deal
+
+    def test_full_return_debt_adjustment_remaining_is_zero(self):
+        """Долг 3.00: предоплата 1.00 + оплачено 1.00, остаток 1.00; полный возврат -> remaining_debt 0.00."""
+        from apps.main.pos_views import adjust_sale_debt_on_return
+        for installments in ([("2.00", "1.00")], [("1.00", "1.00"), ("1.00", "0.00")]):
+            with self.subTest(installments=installments):
+                sale, deal = self._debt_sale_with_paid_part(installments)
+                self.assertEqual(deal.remaining_debt, Decimal("1.00"))
+                adj = adjust_sale_debt_on_return(sale, Decimal("3.00"), is_full_return=True)
+                self.assertEqual(adj["remaining_debt_before"], "1.00")
+                self.assertEqual(adj["reduced_by"], "1.00")
+                self.assertEqual(adj["cash_refund_due"], "2.00")
+                self.assertEqual(adj["remaining_debt"], "0.00")
+                self.assertEqual(adj["deal_status"], "canceled")

@@ -3224,7 +3224,7 @@ class SaleItem(models.Model):
     def line_total(self) -> Decimal:
         base = Decimal(self.unit_price or 0) * Decimal(self.quantity or 0)
         disc = Decimal(getattr(self, "line_discount", None) or 0)
-        return (base - disc).quantize(Decimal("0.01"))
+        return (base - disc).quantize(_Q2, rounding=ROUND_HALF_UP)  # ТЗ 01.11: 0.005 -> 0.01, не банковское
 
     @property
     def amount(self) -> Decimal:
@@ -8067,6 +8067,10 @@ class ShowcaseOrder(models.Model):
     total = models.DecimalField("Итоговая сумма", max_digits=14, decimal_places=2, default=Decimal("0.00"))
     delivery_fee = models.DecimalField("Стоимость доставки", max_digits=14, decimal_places=2, default=Decimal("0.00"))
     source = models.CharField("Источник", max_length=32, default="showcase", blank=True, db_index=True)
+    # ТЗ 01.11: деталь источника — site_cart, assistant, product_card, bot_catalog…
+    source_detail = models.CharField("Деталь источника", max_length=32, blank=True, default="", db_default="", db_index=True)
+    # ТЗ 01.11: токен ссылки на корзину (c_<token>); один токен — один заказ
+    cart_token = models.CharField("Токен корзины", max_length=64, null=True, blank=True, unique=True)
     idempotency_key = models.CharField(max_length=128, null=True, blank=True, db_index=True)
     # ТЗ Б-22: для source=telegram_bot — чат покупателя в Telegram
     telegram_chat_id = models.CharField("Telegram chat id покупателя", max_length=64, blank=True, default="", db_default="")
@@ -8171,6 +8175,24 @@ class ShowcaseStockRequest(models.Model):
         return f"{self.product_id} {self.variant_id} {self.phone or self.telegram_chat_id}"
 
 
+class ShowcaseCartLink(models.Model):
+    """ТЗ 01.11: корзина сайта, переданная в Telegram-бот ссылкой t.me/<bot>?start=c_<token>."""
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    company = models.ForeignKey(Company, on_delete=models.CASCADE, related_name="showcase_cart_links", verbose_name="Компания")
+    token = models.CharField("Токен", max_length=55, unique=True)
+    items = models.JSONField("Позиции", default=list)
+    expires_at = models.DateTimeField("Действует до", db_index=True)
+    client_ip = models.CharField(max_length=64, blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = "Ссылка на корзину витрины"
+        verbose_name_plural = "Ссылки на корзину витрины"
+
+    def __str__(self):
+        return f"ShowcaseCartLink({self.company_id}, {self.token})"
+
+
 class ShowcaseStats(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     company = models.ForeignKey(
@@ -8184,6 +8206,11 @@ class ShowcaseStats(models.Model):
     add_to_cart = models.PositiveIntegerField("Добавлений в корзину", default=0)
     product_views = models.JSONField("Просмотры товаров", default=dict)
     banner_clicks = models.JSONField("Клики по баннерам", default=dict)
+    # ТЗ 01.11: счётчики ассистента, Telegram и ссылок на корзину
+    assistant_open = models.PositiveIntegerField("Открытий ассистента", default=0, db_default=0)
+    assistant_message = models.PositiveIntegerField("Сообщений ассистенту", default=0, db_default=0)
+    telegram_click = models.PositiveIntegerField("Кликов «Заказать в Telegram»", default=0, db_default=0)
+    cart_link = models.PositiveIntegerField("Ссылок на корзину", default=0, db_default=0)
 
     class Meta:
         verbose_name = "Статистика витрины"

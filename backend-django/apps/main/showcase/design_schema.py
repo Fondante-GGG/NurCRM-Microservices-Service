@@ -167,6 +167,8 @@ def default_document(company_name: str = "", whatsapp_phone: Optional[str] = Non
             "whatsapp_phone": whatsapp_phone or None,
             "checkout_button_text": {"ru": "Оформить заказ"},
             "success_text": {"ru": "Спасибо! Мы скоро свяжемся с вами."},
+            # ТЗ 01.11: кнопка «Заказать в Telegram» (включается ещё и серверным ботом, см. build_public_payload)
+            "telegram": {"enabled": False, "placement": ["cart", "product"], "label": {"ru": "Заказать в Telegram"}},
         },
         "footer": {
             "enabled": False, "address": {"ru": ""}, "phones": [], "hours": {"ru": ""},
@@ -175,8 +177,14 @@ def default_document(company_name: str = "", whatsapp_phone: Optional[str] = Non
         },
         "seo": {"title": {"ru": name}, "description": {"ru": ""}, "og_image": None, "favicon": None, "indexing": True},
         "languages": {"enabled": ["ru"], "default": "ru", "switcher": False},
+        # ТЗ 01.11: знания о магазине для ИИ-ассистента. Закрытый раздел: в публичный дизайн не попадает
+        "shop": {"info": {"knowledge": {"ru": ""}}},
     }
 
+
+KNOWLEDGE_MAX = 2000
+PRIVATE_SECTIONS = ("shop",)  # не отдаются в публичном дизайне
+TELEGRAM_PLACEMENTS = ("cart", "product", "header", "floating")
 
 DOCUMENT_SECTIONS = tuple(default_document().keys())
 
@@ -734,6 +742,11 @@ DOCUMENT_SPEC = Obj({
                                regex_msg="Номер WhatsApp: 9–15 цифр, например 996771830438."),
         "checkout_button_text": I18n(40),
         "success_text": I18n(300),
+        "telegram": Obj({
+            "enabled": Bool(),
+            "placement": ListOf(Enum(TELEGRAM_PLACEMENTS), max_items=len(TELEGRAM_PLACEMENTS), unique=True),
+            "label": I18n(40),
+        }),
     }),
     "footer": Obj({
         "enabled": Bool(),
@@ -752,6 +765,7 @@ DOCUMENT_SPEC = Obj({
         "favicon": Media(),
         "indexing": Bool(),
     }),
+    "shop": Obj({"info": Obj({"knowledge": I18n(KNOWLEDGE_MAX)})}),
     "languages": Obj({
         "enabled": ListOf(Enum(LANGUAGES), max_items=len(LANGUAGES), unique=True),
         "default": Enum(LANGUAGES),
