@@ -689,8 +689,12 @@ def handle_customer_message(
     if lower_text.startswith("/start"):
         parts = norm.split(maxsplit=1)
         if len(parts) > 1 and parts[1].strip():
-            # /start <client_id>
-            reply_text = link_client_by_start(company, chat_id, parts[1].strip())
+            # /start <client_id>; метки w_<токен> (чат витрины) и c_<токен> (корзина) — не телефон и не id клиента
+            payload = parts[1].strip()
+            if re.match(r"^w_[A-Za-z0-9_-]{20,40}$", payload):
+                reply_text = "Здравствуйте! Продолжаем разговор из чата на сайте. Напишите ваш вопрос."
+            else:
+                reply_text = link_client_by_start(company, chat_id, payload)
             linked_client = Client.objects.filter(company=company, telegram_chat_id=str(chat_id)).first()
             if linked_client:
                 profile.client = linked_client

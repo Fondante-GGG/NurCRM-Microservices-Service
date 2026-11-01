@@ -6,7 +6,7 @@ from rest_framework.views import APIView
 from apps.main.showcase.services import resolve_public_company
 from core.exceptions import ApiError
 
-from . import access, widget
+from . import access, assistant, widget
 from .access import InboxPermission
 
 
@@ -52,8 +52,12 @@ class PublicSessionCreateView(PublicBase):
     def post(self, request, slug):
         company, w = self.company(request, slug)
         data = request.data if isinstance(request.data, dict) else {}
+        ip = _client_ip(request)
+        tt = str(data.get("turnstile_token") or request.headers.get("X-Turnstile-Token") or "")
+        if not assistant.turnstile_verify(tt, ip):
+            raise ApiError("turnstile_failed", "Проверка «я не робот» не пройдена.", status_code=403)
         try:
-            s, token = widget.create_session(company, _client_ip(request), str(data.get("page") or ""))
+            s, token = widget.create_session(company, ip, str(data.get("page") or ""))
         except widget.RateLimited as exc:
             return _limited(exc)
         return Response({"session_id": str(s.id), "visitor_token": token, "expires_at": s.expires_at.isoformat(),
@@ -91,8 +95,45 @@ class PublicContactView(PublicBase):
         company, w = self.company(request, slug)
         s = self.session(request, company, sid)
         d = request.data if isinstance(request.data, dict) else {}
-        widget.save_contact(s, d.get("name"), d.get("phone"), d.get("consent"), w)
+        widget.save_contact(s, d.get("name"), d.get("phone"), d.get("consent"), w, ip=_client_ip(request))
         return Response({"ok": True})
+
+
+class PublicConsentView(PublicBase):
+    """POST .../consent/ {consent: true, phone, name?} — явное согласие передать номер продавцу; пишется в журнал."""
+
+    def post(self, request, slug, sid):
+        company, w = self.company(request, slug)
+        s = self.session(request, company, sid)
+        d = request.data if isinstance(request.data, dict) else {}
+        if d.get("consent") is not True:
+            raise ApiError("consent_required", "Нужно согласие (consent: true).",
+                           fields={"consent": ["Обязательно"]})
+        if not str(d.get("phone") or "").strip():
+            raise ApiError("invalid", "Укажите телефон.", fields={"phone": ["Обязательное поле"]})
+        widget.save_contact(s, d.get("name"), d.get("phone"), True, w, ip=_client_ip(request))
+        return Response({"ok": True, "consent": True})
+
+
+class PublicAssistantView(PublicBase):
+    """POST .../sessions/{id}/assistant/ {text, lang?, client_msg_id?} — вопрос ИИ-помощнику."""
+
+    def post(self, request, slug, sid):
+        company, w = self.company(request, slug)
+        s = self.session(request, company, sid)
+        d = request.data if isinstance(request.data, dict) else {}
+        res = assistant.ask(s, d.get("text"), str(d.get("lang") or "ru"), _client_ip(request), d.get("client_msg_id"))
+        return Response(res)
+
+
+class PublicSessionView(PublicBase):
+    """DELETE .../sessions/{id}/ — «Удалить мой чат» (по токену сеанса)."""
+
+    def delete(self, request, slug, sid):
+        company, w = self.company(request, slug)
+        s = self.session(request, company, sid)
+        out = assistant.delete_session_data(s)
+        return Response({"ok": True, **out})
 
 
 class PublicTelegramLinkView(PublicBase):
@@ -117,3 +158,30 @@ class WidgetSettingsView(APIView):
         return Response(widget.settings_out(w))
 
     patch = put
+
+
+class AssistantSettingsView(APIView):
+    """GET/PUT api/main/inbox/assistant/settings/ — помощник витрины: включён, потолок в сутки, «Правила магазина»."""
+    permission_classes = [InboxPermission]
+
+    def get(self, request):
+        company = access.require(request.user, "can_manage_channels")
+        return Response(assistant.settings_out(assistant.get_settings(company), company))
+
+    def put(self, request):
+        company = access.require(request.user, "can_manage_channels")
+        a = assistant.get_settings(company)
+        assistant.apply_settings(a, request.data if isinstance(request.data, dict) else {})
+        return Response(assistant.settings_out(a, company))
+
+    patch = put
+
+
+class AssistantTestView(APIView):
+    """POST api/main/inbox/assistant/test/ {text} — «Проверить помощника»."""
+    permission_classes = [InboxPermission]
+
+    def post(self, request):
+        company = access.require(request.user, "can_manage_channels")
+        d = request.data if isinstance(request.data, dict) else {}
+        return Response(assistant.test_question(company, d.get("text") or "Сколько стоит доставка?", str(d.get("lang") or "ru")))

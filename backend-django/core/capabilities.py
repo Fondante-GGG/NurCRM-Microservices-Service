@@ -32,6 +32,8 @@ FEATURES = (
     "receipt_patch",  # ТЗ 31.10 п.21: PATCH suppliers/receipts/{id}/ (dry_run, If-Match, коды ошибок)
     # ТЗ редактор накладных 30.10 (вариант А): PATCH с Idempotency-Key, версии/откат, деньги, receipt_changed
     "receipt_edit",
+    # ТЗ 01.11: чат на витрине (web_widget, согласие, удаление чата) и ИИ-помощник витрины с ключом магазина
+    "showcase_chat", "showcase_assistant",
 )
 
 
