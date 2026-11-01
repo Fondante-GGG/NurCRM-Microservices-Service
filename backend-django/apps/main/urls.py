@@ -527,6 +527,7 @@ urlpatterns = [
     # ТЗ редактор накладных 30.10: лента правок, версии и откат прихода
     path("suppliers/receipts/changes/", SupplierReceiptChangesAPIView.as_view(), name="supplier-receipt-changes"),
     path("suppliers/receipts/<uuid:pk>/versions/", SupplierReceiptVersionsAPIView.as_view(), name="supplier-receipt-versions"),
+    path("suppliers/receipts/<uuid:pk>/history/", SupplierReceiptVersionsAPIView.as_view(), name="supplier-receipt-history"),  # псевдоним versions/
     path("suppliers/receipts/<uuid:pk>/versions/<int:n>/", SupplierReceiptVersionDetailAPIView.as_view(), name="supplier-receipt-version"),
     path("suppliers/receipts/<uuid:pk>/revert/", SupplierReceiptRevertAPIView.as_view(), name="supplier-receipt-revert"),
     path("suppliers/receipts/<uuid:pk>/pdf/", SupplierReceiptPdfAPIView.as_view(), name="supplier-receipt-pdf"),  # ТЗ Н-33

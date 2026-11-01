@@ -511,3 +511,19 @@ class ReceiptEditAccessTests(ReceiptEditBase):
         self.assertEqual(self.code(self.api.patch("/api/users/company/", {"receipt_edit_window": "12h"},
                                                   format="json"), 400), "validation_error")
         self.assertFalse(admin.get("/api/users/company/").data["receipt_edit_window_editable"])
+
+
+class ReceiptHistoryAliasTests(ReceiptEditBase):
+    def test_history_is_alias_of_versions(self):
+        self.assertEqual(self.patch({"lines": [{"id": str(self.item.id), "qty": 9}]}).status_code, 200)
+        a = self.api.get(self.url + "versions/")
+        b = self.api.get(self.url + "history/")
+        self.assertEqual(b.status_code, 200, b.data)
+        self.assertEqual(a.data, b.data)
+        self.assertEqual([r["version"] for r in b.data["results"]], [1, 2])
+
+    def test_capabilities_list_new_flags(self):
+        from core.capabilities import FEATURES
+
+        self.assertIn("receipt_edit_discount", FEATURES)
+        self.assertIn("receipt_edit_sale_price", FEATURES)

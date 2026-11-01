@@ -32,6 +32,8 @@ FEATURES = (
     "receipt_patch",  # ТЗ 31.10 п.21: PATCH suppliers/receipts/{id}/ (dry_run, If-Match, коды ошибок)
     # ТЗ редактор накладных 30.10 (вариант А): PATCH с Idempotency-Key, версии/откат, деньги, receipt_changed
     "receipt_edit",
+    "receipt_edit_discount",  # 01.11: PATCH прихода — скидка шапки (discount / discount_percent)
+    "receipt_edit_sale_price",  # 01.11: PATCH прихода — цена продажи строки (sale_price)
 )
 
 
