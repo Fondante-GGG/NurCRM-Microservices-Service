@@ -527,3 +527,158 @@ class ReceiptHistoryAliasTests(ReceiptEditBase):
 
         self.assertIn("receipt_edit_discount", FEATURES)
         self.assertIn("receipt_edit_sale_price", FEATURES)
+
+
+class ReceiptDiscountEditTests(ReceiptEditBase):
+    """01.11: скидка шапки (discount / discount_percent) в правке прихода."""
+
+    def test_discount_money_changes_total_debt_and_lines(self):
+        r = self.patch({"discount": "20"})
+        self.assertEqual(r.status_code, 200, r.data)
+        dl = r.data["deltas"]
+        self.assertEqual(dl["total"], {"before": "100.00", "after": "80.00", "delta": "-20.00"})
+        self.assertEqual(dl["supplier_debt"]["delta"], "-20.00")
+        self.assertEqual(dl["header"]["discount"], {"before": "0.00", "after": "20.00"})
+        self.assertEqual(r.data["receipt"]["total_amount"], "80.00")
+        rc = SupplierReceipt.objects.get(pk=self.rid)
+        self.assertEqual((rc.discount, rc.discount_percent, rc.version), (Decimal("20.00"), None, 2))
+        self.item.refresh_from_db()
+        self.assertEqual((self.item.purchase_price, self.item.landed_price), (Decimal("8.0000"), Decimal("8.0000")))
+        self.deal.refresh_from_db()
+        self.assertEqual(self.deal.amount, Decimal("80.00"))
+        self.p.refresh_from_db()
+        self.assertEqual(self.p.purchase_price, Decimal("8.0000"))  # закупка в карточке — как при проведении
+        v2 = SupplierReceiptVersion.objects.get(receipt_id=self.rid, version=2)
+        self.assertEqual((v2.snapshot["discount"], v2.snapshot["total"]), ("20.00", "80.00"))
+        self.assertEqual(SupplierReceiptVersion.objects.get(receipt_id=self.rid, version=1).snapshot["discount"], "0.00")
+
+    def test_discount_percent_forms(self):
+        r = self.patch({"discount": "10%"})
+        self.assertEqual(r.status_code, 200, r.data)
+        rc = SupplierReceipt.objects.get(pk=self.rid)
+        self.assertEqual((rc.discount, rc.discount_percent), (Decimal("10.00"), Decimal("10.00")))
+        self.assertEqual(r.data["deltas"]["total"]["after"], "90.00")
+        r = self.patch({"discount_percent": "20"})
+        self.assertEqual(r.status_code, 200, r.data)
+        self.assertEqual(r.data["deltas"]["total"], {"before": "90.00", "after": "80.00", "delta": "-10.00"})
+        rc.refresh_from_db()
+        self.assertEqual((rc.discount, rc.discount_percent), (Decimal("20.00"), Decimal("20.00")))
+
+    def test_remove_discount_and_unchanged_is_noop(self):
+        self.assertEqual(self.patch({"discount": "20"}).status_code, 200)
+        r = self.patch({"discount": "20"})
+        self.assertEqual(r.status_code, 200, r.data)
+        self.assertEqual(r.data["deltas"]["header"], {})
+        self.assertEqual(r.data["deltas"]["total"]["delta"], "0.00")
+        r = self.patch({"discount": 0})
+        self.assertEqual(r.data["deltas"]["total"], {"before": "80.00", "after": "100.00", "delta": "20.00"})
+        self.assertEqual(SupplierReceipt.objects.get(pk=self.rid).discount, Decimal("0.00"))
+        self.item.refresh_from_db()
+        self.assertEqual((self.item.purchase_price, self.item.landed_price), (Decimal("10.0000"), None))
+
+    def test_discount_over_total_and_bad_values(self):
+        self.assertEqual(self.code(self.patch({"discount": "150"}), 422), "discount_exceeds_total")
+        self.assertEqual(self.code(self.patch({"discount": "-1"}), 422), "validation_error")
+        self.assertEqual(self.code(self.patch({"discount_percent": "101"}), 422), "validation_error")
+
+    def test_discount_dry_run_changes_nothing(self):
+        r = self.patch({"discount": "30", "dry_run": True}, key=False)
+        self.assertEqual(r.status_code, 200, r.data)
+        self.assertEqual(r.data["deltas"]["total"]["after"], "70.00")
+        self.assertEqual(SupplierReceipt.objects.get(pk=self.rid).version, 1)
+        self.assertEqual(SupplierReceipt.objects.get(pk=self.rid).discount, Decimal("0.00"))
+
+    def test_discount_with_line_change_and_version_check(self):
+        r = self.patch({"discount": "10%", "lines": [{"id": str(self.item.id), "qty": 5}]}, HTTP_IF_MATCH='"1"')
+        self.assertEqual(r.status_code, 200, r.data)
+        self.assertEqual(r.data["deltas"]["total"]["after"], "45.00")
+        self.assertEqual(self.code(self.patch({"discount": "5"}, HTTP_IF_MATCH='"1"'), 412), "version_conflict")
+
+    def test_edit_discount_set_at_creation(self):
+        r = self.receive([{"product": str(self.p2.id), "qty": 10, "purchase_price": "10.00"}], discount="10")
+        rid = r.data["id"]
+        url = f"/api/main/suppliers/receipts/{rid}/"
+        self.assertEqual(self.api.get(url).data["total_amount"], "90.00")
+        resp = self.patch({"discount": "20"}, url=url)
+        self.assertEqual(resp.status_code, 200, resp.data)
+        self.assertEqual(resp.data["deltas"]["total"], {"before": "90.00", "after": "80.00", "delta": "-10.00"})
+        self.assertEqual(SupplierReceiptItem.objects.get(receipt_id=rid).purchase_price, Decimal("8.0000"))
+
+    def test_revert_restores_discount(self):
+        self.assertEqual(self.patch({"discount": "20"}).status_code, 200)
+        r = self.api.post(self.url + "revert/", {"to_version": 1, "reason": REASON, "version": 2}, format="json",
+                          HTTP_IDEMPOTENCY_KEY=str(uuid.uuid4()))
+        self.assertEqual(r.status_code, 200, r.data)
+        rc = SupplierReceipt.objects.get(pk=self.rid)
+        self.assertEqual((rc.discount, rc.version), (Decimal("0.00"), 3))
+        self.assertEqual(r.data["receipt"]["total_amount"], "100.00")
+        self.item.refresh_from_db()
+        self.assertEqual(self.item.purchase_price, Decimal("10.0000"))
+
+    def test_discount_permission_and_reason_rules_apply(self):
+        _, admin = self.user(role="admin")
+        self.assertEqual(self.code(self.patch({"discount": "5"}, api=admin), 403), "permission_denied")
+        self.assertEqual(self.code(self.patch({"discount": "5", "reason": ""}), 400), "reason_required")
+
+
+class ReceiptSalePriceEditTests(ReceiptEditBase):
+    """01.11: цена продажи строки (sale_price) в правке прихода."""
+
+    def test_sale_price_updates_line_and_product(self):
+        r = self.patch({"lines": [{"id": str(self.item.id), "sale_price": "20"}]})
+        self.assertEqual(r.status_code, 200, r.data)
+        sp = r.data["deltas"]["sale_price"]
+        self.assertEqual(len(sp), 1)
+        self.assertEqual((sp[0]["line_id"], sp[0]["before"], sp[0]["after"], sp[0]["applied"]),
+                         (str(self.item.id), "15.000", "20.000", True))
+        self.assertEqual((sp[0]["product_price_before"], sp[0]["product_price_after"]), ("15.00", "20.00"))
+        self.assertEqual(r.data["deltas"]["lines"][0]["sale_price_after"], "20.000")
+        self.item.refresh_from_db()
+        self.assertEqual((self.item.sale_price, self.item.previous_sale_price), (Decimal("20"), Decimal("15")))
+        self.p.refresh_from_db()
+        self.assertEqual((self.p.price, self.p.markup_percent), (Decimal("20.00"), Decimal("100.0000")))
+        self.assertEqual(r.data["deltas"]["total"]["delta"], "0.00")
+        snap = SupplierReceiptVersion.objects.get(receipt_id=self.rid, version=2).snapshot
+        self.assertEqual(snap["lines"][0]["sale_price"], "20.000")
+
+    def test_sale_price_flag_false_keeps_product(self):
+        r = self.patch({"update_product_sale_price": False, "lines": [{"id": str(self.item.id), "sale_price": "25"}]})
+        self.assertEqual(r.status_code, 200, r.data)
+        self.assertFalse(r.data["deltas"]["sale_price"][0]["applied"])
+        self.item.refresh_from_db()
+        self.p.refresh_from_db()
+        self.assertEqual((self.item.sale_price, self.p.price), (Decimal("25"), Decimal("15.00")))
+
+    def test_sale_price_validation_and_dry_run(self):
+        self.assertEqual(self.code(self.patch({"lines": [{"id": str(self.item.id), "sale_price": "-1"}]}), 422),
+                         "validation_error")
+        self.assertEqual(self.code(self.patch({"lines": [{"id": str(self.item.id), "sale_price": "abc"}]}), 422),
+                         "validation_error")
+        r = self.patch({"dry_run": True, "lines": [{"id": str(self.item.id), "sale_price": "30"}]}, key=False)
+        self.assertEqual(r.status_code, 200, r.data)
+        self.assertEqual(r.data["deltas"]["sale_price"][0]["product_price_after"], "30.00")
+        self.p.refresh_from_db()
+        self.assertEqual(self.p.price, Decimal("15.00"))
+
+    def test_sale_price_on_added_line(self):
+        r = self.patch({"lines": [{"product": str(self.p2.id), "qty": 4, "purchase_price": "5", "sale_price": "9"}]})
+        self.assertEqual(r.status_code, 200, r.data)
+        it = SupplierReceiptItem.objects.get(receipt_id=self.rid, product=self.p2)
+        self.assertEqual((it.sale_price, it.previous_sale_price), (Decimal("9"), Decimal("8")))
+        self.p2.refresh_from_db()
+        self.assertEqual(self.p2.price, Decimal("9.00"))
+
+    def test_revert_restores_line_sale_price_but_not_product(self):
+        self.assertEqual(self.patch({"lines": [{"id": str(self.item.id), "sale_price": "20"}]}).status_code, 200)
+        r = self.api.post(self.url + "revert/", {"to_version": 1, "reason": REASON, "version": 2}, format="json",
+                          HTTP_IDEMPOTENCY_KEY=str(uuid.uuid4()))
+        self.assertEqual(r.status_code, 200, r.data)
+        self.item.refresh_from_db()
+        self.p.refresh_from_db()
+        self.assertEqual(self.item.sale_price, Decimal("15"))
+        self.assertEqual(self.p.price, Decimal("20.00"))  # откат документа карточку товара не трогает
+
+    def test_sale_price_permission(self):
+        _, admin = self.user(role="admin")
+        r = self.patch({"lines": [{"id": str(self.item.id), "sale_price": "20"}]}, api=admin)
+        self.assertEqual(self.code(r, 403), "permission_denied")

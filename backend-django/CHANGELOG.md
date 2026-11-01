@@ -2,6 +2,11 @@
 
 Новые записи сверху. Единое ТЗ бэкенду 26.10.2026, разделы 8–11 (Б-52…Б-87).
 
+## 01.11.2026 — редактор накладных: скидка, цена продажи, history
+- `PATCH suppliers/receipts/{id}/`: шапка `discount` (сумма / `"10%"`) и `discount_percent`; пересчитывает закупку (и `landed_price`) строк пропорционально, как при проведении; идёт в итог, долг поставщику, кассу, `deltas.header`, снимок версии; откат версии возвращает скидку. 422 `discount_exceeds_total`.
+- Строка `lines[].sale_price` (+ `update_product_sale_price`, по умолчанию true): меняет цену продажи строки и товара (наценка от закупки), `deltas.sale_price[]`, предупреждение `sale_price_not_latest`; откат цену товара не трогает.
+- `GET suppliers/receipts/{id}/history/` — псевдоним `versions/`. Признаки `receipt_edit_discount`, `receipt_edit_sale_price`. НДС не поддерживается (поля нет). Миграций нет.
+
 ## 31.10.2026 — ТЗ «Редактор накладных закупок» (30.10), вариант А
 - `PATCH api/main/suppliers/receipts/{id}/` по подробному ТЗ: обязательный `Idempotency-Key` (повтор → `replayed: true`), `If-Match`/`version`, `reason` 5–500 + `reason_code`, `dry_run`, `lines` (старое `items` понимаем), `update_product_purchase_price`, `supplier_id`, `payment`, `source`, `device`. Ответ `{receipt, deltas, movements, warnings, replayed}`. Коды по таблице 3.2 через ApiError (`{code, detail, data}`): 412/409 version_conflict, 423 period_closed, построчный has_returns, receipt_fully_returned, negative_stock с min_qty, debt_already_paid, 422 validation_error/fractional_not_allowed.
 - Остатки — движение `receipt_correction` на каждую строку; закупка в карточке по правилу (удалили последний приход товара — откат к прошлому); оплаченный приход — сторно/доплата в ту же кассу (закрытая смена → основная касса, `shift_closed_money_to_main`); смена поставщика/оплаты — если не было возвратов и оплат долга.

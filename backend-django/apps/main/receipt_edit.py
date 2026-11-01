@@ -279,6 +279,27 @@ def parse_body(data, query_params=None):
         header["comment"] = str(data.get("comment") or "")
     out["header"] = header
 
+    # 01.11: скидка шапки — сумма | "10%" | discount_percent; пустое/0 = убрать скидку
+    out["discount_req"] = None
+    out["discount_rescale"] = data.get("discount_rescale") is None or _truthy(data.get("discount_rescale"))
+    out["update_sale"] = data.get("update_product_sale_price") is None or _truthy(data.get("update_product_sale_price"))
+    if "discount" in data or "discount_percent" in data:
+        raw_d, raw_p = data.get("discount"), data.get("discount_percent")
+        money, pct = _Z, None
+        if isinstance(raw_d, str) and raw_d.strip().endswith("%"):
+            pct, err = _parse_dec(raw_d.strip()[:-1], 2)
+            if err or pct < 0 or pct > 100:
+                fields["discount"] = [err or "Процент от 0 до 100."]
+        elif raw_p not in (None, ""):
+            pct, err = _parse_dec(raw_p, 2)
+            if err or pct < 0 or pct > 100:
+                fields["discount_percent"] = [err or "Процент от 0 до 100."]
+        elif raw_d not in (None, ""):
+            money, err = _parse_dec(raw_d, 2)
+            if err or money < 0:
+                fields["discount"] = [err or "Скидка не может быть отрицательной."]
+        out["discount_req"] = {"money": money, "pct": pct}
+
     out["supplier_id"] = None
     if data.get("supplier_id") not in (None, ""):
         sid = _parse_uuid(data.get("supplier_id"))
@@ -352,6 +373,10 @@ def parse_body(data, query_params=None):
                     ln["purchase_price"], err = _parse_dec(row.get("purchase_price"), 4)
                     if err or ln["purchase_price"] <= 0:
                         fields[f"{key}.purchase_price"] = [err or "Цена закупки больше нуля."]
+            if "sale_price" in row and not ln["delete"]:
+                ln["sale_price"], err = _parse_dec(row.get("sale_price"), 3)
+                if err or ln["sale_price"] < 0:
+                    fields[f"{key}.sale_price"] = [err or "Цена продажи не может быть отрицательной."]
             if "line_total" in row and not ln["delete"]:
                 if row.get("line_total") is None:
                     ln["line_total"] = None
@@ -389,6 +414,7 @@ def receipt_snapshot(receipt, items=None):
             "unit": getattr(it.product, "unit", "") or "",
             "qty": _s(it.qty, _Q3), "purchase_price": _s(it.purchase_price, _Q4),
             "line_total": _s(it.line_total, _Q4), "amount": _s(amt),
+            "sale_price": _s(it.sale_price, _Q3),
         })
     supplier = receipt.supplier
     return {
@@ -398,6 +424,8 @@ def receipt_snapshot(receipt, items=None):
         "document_date": receipt.document_date.isoformat() if receipt.document_date else None,
         "comment": receipt.comment or "",
         "payment_type": _payment_type(receipt),
+        "discount": _s(receipt.discount),
+        "discount_percent": _s(receipt.discount_percent),
         "total": _s(_total(amounts)),
         "lines": lines,
     }
@@ -509,7 +537,8 @@ def _edit(view, request, pk, body, action):
             elif "qty" in ln and "line_total" not in ln and item.line_total is not None and qty != Decimal(str(item.qty)):
                 lt = None  # сумма по накладной относилась к старому количеству — дальше qty × цена
             plan.append({"action": "update", "item": item, "product_id": item.product_id, "index": ln["index"],
-                         "qty": qty, "purchase_price": pp, "line_total": lt})
+                         "qty": qty, "purchase_price": pp, "line_total": lt,
+                         **({"sale_price": ln["sale_price"]} if "sale_price" in ln else {})})
         else:
             qty = ln["qty"]
             pp = ln.get("purchase_price")
@@ -517,7 +546,8 @@ def _edit(view, request, pk, body, action):
             if lt is not None and pp is None:
                 pp = (Decimal(str(lt)) / Decimal(str(qty))).quantize(_Q4, rounding=ROUND_HALF_UP)
             plan.append({"action": "add", "item": None, "product_id": ln["product"], "index": ln["index"],
-                         "qty": qty, "purchase_price": pp, "line_total": lt, "client_row_id": ln.get("client_row_id")})
+                         "qty": qty, "purchase_price": pp, "line_total": lt, "client_row_id": ln.get("client_row_id"),
+                         **({"sale_price": ln["sale_price"]} if "sale_price" in ln else {})})
     if fields:
         raise _validation(fields)
     # строки, где по факту ничего не меняется, не трогаем
@@ -525,7 +555,13 @@ def _edit(view, request, pk, body, action):
         p["qty"] != Decimal(str(p["item"].qty))
         or _s(p["purchase_price"], _Q4) != _s(p["item"].purchase_price, _Q4)
         or _s(p["line_total"], _Q4) != _s(p["item"].line_total, _Q4)
+        or ("sale_price" in p and _s(p["sale_price"], _Q3) != _s(p["item"].sale_price, _Q3))
     )]
+
+    # 01.11: скидка шапки — пересчёт закупки строк (как при проведении) и запись в шапку
+    disc_change = None
+    if body["discount_req"] is not None:
+        plan, disc_change = _discount_plan(receipt, plan, current, body["discount_req"], body["discount_rescale"])
 
     deleted = {str(p["item"].id) for p in plan if p["action"] == "delete"}
     added = [p for p in plan if p["action"] == "add"]
@@ -720,6 +756,12 @@ def _edit(view, request, pk, body, action):
         header_changes["supplier_id"] = {"before": str(receipt.supplier_id), "after": str(new_supplier.id)}
     if payment is not None:
         header_changes["payment"] = {"before": _payment_type(receipt), "after": payment["type"]}
+    if disc_change is not None:
+        for k in ("discount", "discount_percent"):
+            old, new = disc_change["before"][k], disc_change[k]
+            if old != new:
+                header_changes[k] = {"before": _s(old), "after": _s(new)}
+    sale_plan = _sale_plan(receipt, plan, products, price_plan, body["update_sale"], warnings)
 
     deltas = {
         "stock": stock_rows,
@@ -734,6 +776,7 @@ def _edit(view, request, pk, body, action):
                        "cashbox": str(c["cashbox"].id) if c.get("cashbox") is not None else None,
                        "shift": str(c["shift"].id) if c.get("shift") is not None else None} for c in cash_plan],
         "header": header_changes,
+        "sale_price": [{k: v for k, v in e.items() if k != "product_id_raw" and not k.startswith("_")} for e in sale_plan],
         "lines": [_line_change(p, products) for p in plan],
     }
 
@@ -758,12 +801,20 @@ def _edit(view, request, pk, body, action):
         elif p["action"] == "update":
             item = p["item"]
             item.qty, item.purchase_price, item.line_total = p["qty"], p["purchase_price"], p["line_total"]
-            item.save(update_fields=["qty", "purchase_price", "line_total"])
+            fl = ["qty", "purchase_price", "line_total"]
+            if "sale_price" in p:
+                item.sale_price = p["sale_price"]
+                fl.append("sale_price")
+            if "landed_price" in p:
+                item.landed_price = p["landed_price"]
+                fl.append("landed_price")
+            item.save(update_fields=fl)
         else:
             p["item"] = SupplierReceiptItem.objects.create(
                 receipt=receipt, product=prod, qty=p["qty"], purchase_price=p["purchase_price"],
-                line_total=p["line_total"], previous_sale_price=prod.price, sale_price=prod.price,
-                markup_percent=prod.markup_percent,
+                line_total=p["line_total"], previous_sale_price=prod.price,
+                sale_price=p["sale_price"] if "sale_price" in p else prod.price,
+                markup_percent=prod.markup_percent, landed_price=p.get("landed_price"),
             )
             try:
                 prod.suppliers.add(supplier_for_lines)
@@ -807,6 +858,8 @@ def _edit(view, request, pk, body, action):
             upd["markup_percent"] = ((price - new_pp) / new_pp * Decimal("100")).quantize(_Q4, rounding=ROUND_HALF_UP)
         Product.objects.filter(pk=prod.pk).update(**upd)
 
+    _apply_sale_plan(request, company, sale_plan, products, now)
+
     # долг поставщику
     old_supplier_id = receipt.supplier_id
     if deal is not None and new_supplier is not None:
@@ -830,6 +883,9 @@ def _edit(view, request, pk, body, action):
     for k, v in header.items():
         setattr(receipt, k, v)
     upd_fields = [*header.keys(), "version", "edit_count", "edited_at", "edited_by"]
+    if disc_change is not None:
+        receipt.discount, receipt.discount_percent = disc_change["discount"], disc_change["discount_percent"]
+        upd_fields += ["discount", "discount_percent"]
     if new_supplier is not None:
         receipt.supplier = new_supplier
         upd_fields.append("supplier")
@@ -910,7 +966,7 @@ def receipt_queryset():
 def _line_change(p, products):
     item = p["item"]
     prod = products[p["product_id"]]
-    return {
+    out = {
         "action": p["action"], "id": str(item.id) if item is not None else None,
         "client_row_id": p.get("client_row_id"),
         "product_id": str(prod.id), "product_name": prod.name,
@@ -921,6 +977,71 @@ def _line_change(p, products):
         "line_total_before": _s(item.line_total) if item is not None else None,
         "line_total_after": None if p["action"] == "delete" else _s(p["line_total"]),
     }
+    if "sale_price" in p:
+        out["sale_price_before"] = _s(item.sale_price, _Q3) if item is not None else None
+        out["sale_price_after"] = _s(p["sale_price"], _Q3)
+    return out
+
+
+def _sale_plan(receipt, plan, products, price_plan, update_product, warnings):
+    """
+    01.11: цена продажи строки. Как при проведении (price/selling_price в строке): цена продажи товара и наценка
+    от закупки; update_product_sale_price=false — меняем только строку документа. Несколько строк одного
+    товара — действует последняя. Приход не последний по товару — предупреждение sale_price_not_latest.
+    """
+    rows = [p for p in plan if "sale_price" in p and p["action"] != "delete"]
+    last = {}
+    for p in rows:
+        last[p["product_id"]] = p
+    out = []
+    for p in rows:
+        prod = products[p["product_id"]]
+        item = p["item"]
+        new = Decimal(str(p["sale_price"])).quantize(_Q2, rounding=ROUND_HALF_UP)
+        before = Decimal(str(prod.price or 0))
+        latest = not SupplierReceiptItem.objects.filter(
+            product_id=prod.id, receipt__created_at__gt=receipt.created_at).exclude(receipt_id=receipt.id).exists()
+        applied = bool(update_product) and last[p["product_id"]] is p
+        if applied and not latest and not any(w.get("code") == "sale_price_not_latest" for w in warnings):
+            warnings.append({"code": "sale_price_not_latest"})
+        eff = next((Decimal(e["after"]) for e in price_plan if e["product_id_raw"] == prod.id), None)
+        out.append({"line_id": str(item.id) if item is not None else None, "product_id": str(prod.id),
+                    "product_id_raw": prod.id, "name": prod.name,
+                    "before": _s(item.sale_price, _Q3) if item is not None else None,
+                    "after": _s(p["sale_price"], _Q3),
+                    "product_price_before": _s(before), "product_price_after": _s(new if applied else before),
+                    "applied": applied, "latest": latest, "_new": new, "_eff": eff})
+    return out
+
+
+def _apply_sale_plan(request, company, sale_plan, products, now):
+    for e in sale_plan:
+        if not e["applied"]:
+            continue
+        prod = products[e["product_id_raw"]]
+        new = e["_new"]
+        upd = {"price": new, "updated_at": now}
+        pp = Product.objects.filter(pk=prod.pk).values_list("purchase_price", flat=True).first()
+        if pp is not None and Decimal(str(pp)) > 0:
+            pp = Decimal(str(pp))
+            upd["markup_percent"] = ((new - pp) / pp * Decimal("100")).quantize(_Q4, rounding=ROUND_HALF_UP)
+        old = Decimal(str(prod.price or 0))
+        Product.objects.filter(pk=prod.pk).update(**upd)
+        if old.quantize(_Q2) != new:
+            try:
+                from apps.construction import audit as admin_audit
+
+                admin_audit.log_request(request, "price_change", "product", prod.pk, prod.name,
+                                        before={"price": str(old)}, after={"price": str(new)}, company=company)
+            except Exception:
+                logger.exception("receipt edit sale price audit failed")
+        try:
+            from apps.main.change_feed import _emit
+
+            _emit(company.id, "product_changed", branch_id=None, entity="product", entity_id=prod.pk,
+                  data={"what": "price", "product": prod.pk})
+        except Exception:
+            logger.exception("receipt edit sale price event failed")
 
 
 def _batch_moves(plan):
@@ -966,6 +1087,89 @@ def _adjust_expiry(product, receipt, delta):
     batch.quantity = max(_Z, batch.quantity + d)
     batch.remaining_quantity = max(_Z, batch.remaining_quantity + d)
     batch.save(update_fields=["quantity", "remaining_quantity"])
+
+
+def _extra_total(receipt):
+    total = _Z
+    for e in receipt.extra_costs or []:
+        try:
+            total += Decimal(str((e or {}).get("amount") or 0))
+        except (InvalidOperation, ValueError, AttributeError):
+            pass
+    return total
+
+
+def _discount_plan(receipt, plan, current, req, rescale):
+    """
+    01.11: смена скидки шапки. Как при проведении (_receipt_discount_extras): закупка строк хранится уже
+    с учётом скидки и доп. расходов, поправка (доп. расходы − скидка) раскладывается на строки пропорционально
+    сумме строки. Здесь: старая поправка снимается, новая раскладывается — строки масштабируются на
+    (база + новая поправка) / (база + старая поправка). Строки, правленные в этом же запросе, берутся как есть.
+    → (plan, {"discount": Decimal, "discount_percent": Decimal|None, "before": {...}} | None)
+    """
+    extra = _extra_total(receipt)
+    old_disc = Decimal(str(receipt.discount or 0))
+    old_pct = None if receipt.discount_percent is None else Decimal(str(receipt.discount_percent))
+
+    # живые строки после правок: {key: [qty, pp, lt, product, plan_entry|None, item|None]}
+    by_item = {str(p["item"].id): p for p in plan if p["item"] is not None}
+    live = []
+    for k, item in current.items():
+        p = by_item.get(k)
+        if p is not None and p["action"] == "delete":
+            continue
+        if p is not None:
+            live.append({"p": p, "item": item, "qty": p["qty"], "pp": p["purchase_price"], "lt": p["line_total"],
+                         "product": item.product})
+        else:
+            live.append({"p": None, "item": item, "qty": Decimal(str(item.qty)), "pp": item.purchase_price,
+                         "lt": item.line_total, "product": item.product})
+    for p in plan:
+        if p["action"] == "add":
+            prod = Product.objects.filter(pk=p["product_id"]).only("id", "purchase_price").first()
+            live.append({"p": p, "item": None, "qty": p["qty"], "pp": p["purchase_price"], "lt": p["line_total"],
+                         "product": prod})
+    for row in live:
+        row["amount"] = _line_amount(row["qty"], row["pp"], row["lt"], row["product"])
+    stored = sum((r["amount"] for r in live), _Z)
+    subtotal = stored - (extra - old_disc)  # сумма строк до скидки и доп. расходов
+
+    if req["pct"] is not None:
+        new_pct = req["pct"]
+        new_disc = (subtotal * new_pct / Decimal("100")).quantize(_Q2, rounding=ROUND_HALF_UP)
+    else:
+        new_pct, new_disc = None, req["money"]
+    if new_disc > subtotal:
+        raise _validation({"discount": ["Скидка больше суммы прихода."]}, code="discount_exceeds_total",
+                          detail="Скидка больше суммы прихода.")
+    same = new_disc == old_disc and new_pct == old_pct
+    if same:
+        return plan, None
+    change = {"discount": new_disc, "discount_percent": new_pct,
+              "before": {"discount": old_disc, "discount_percent": old_pct}}
+    if not rescale or stored <= 0 or new_disc == old_disc:
+        return plan, change
+    ratio = (subtotal + (extra - new_disc)) / stored
+    if ratio == 1:
+        return plan, change
+    landed = bool(extra or new_disc)
+    extra_idx = 100000
+    for row in live:
+        qty, pp, lt = row["qty"], row["pp"], row["lt"]
+        if pp is not None:
+            new_pp = (Decimal(str(pp)) * ratio).quantize(_Q4, rounding=ROUND_HALF_UP)
+        else:
+            new_pp = (row["amount"] * ratio / Decimal(str(qty))).quantize(_Q4, rounding=ROUND_HALF_UP) if qty else None
+        new_lt = None if lt is None else (Decimal(str(lt)) * ratio).quantize(_Q4, rounding=ROUND_HALF_UP)
+        entry = row["p"]
+        if entry is None:
+            extra_idx += 1
+            entry = {"action": "update", "item": row["item"], "product_id": row["item"].product_id,
+                     "index": extra_idx, "qty": qty, "purchase_price": pp, "line_total": lt}
+            plan.append(entry)
+        entry["purchase_price"], entry["line_total"] = new_pp, new_lt
+        entry["landed_price"] = new_pp if landed else None
+    return plan, change
 
 
 def _price_plan(receipt, plan, products, current_items, rule):
@@ -1263,10 +1467,13 @@ def revert_body(receipt, snapshot, data):
         if s is None:
             lines.append({"id": lid, "delete": True})
         elif (_s(item.qty, _Q3) != s.get("qty") or _s(item.purchase_price, _Q4) != s.get("purchase_price")
-              or _s(item.line_total, _Q4) != s.get("line_total")):
+              or _s(item.line_total, _Q4) != s.get("line_total")
+              or (s.get("sale_price") is not None and _s(item.sale_price, _Q3) != s["sale_price"])):
             row = {"id": lid, "qty": s.get("qty"), "line_total": s.get("line_total")}
             if s.get("purchase_price") is not None:
                 row["purchase_price"] = s["purchase_price"]
+            if s.get("sale_price") is not None:
+                row["sale_price"] = s["sale_price"]
             lines.append(row)
     for lid, s in snap_lines.items():
         if lid not in cur:
@@ -1277,6 +1484,13 @@ def revert_body(receipt, snapshot, data):
     out = {k: data.get(k) for k in ("reason", "reason_code", "version", "dry_run", "source", "device",
                                     "update_product_purchase_price") if k in data}
     out["lines"] = lines
+    if "discount" in snapshot:  # снимки до 01.11 скидки не знают — тогда шапку не трогаем
+        if (_s(receipt.discount) != snapshot.get("discount")
+                or _s(receipt.discount_percent) != snapshot.get("discount_percent")):
+            out["discount"] = snapshot.get("discount") or "0"
+            out["discount_percent"] = snapshot.get("discount_percent")
+            out["discount_rescale"] = False  # закупка строк восстанавливается из снимка как есть
+    out["update_product_sale_price"] = data.get("update_product_sale_price", False)  # откат карточку товара не трогает
     if (receipt.document_number or "") != (snapshot.get("document_number") or ""):
         out["document_number"] = snapshot.get("document_number") or ""
     cur_date = receipt.document_date.isoformat() if receipt.document_date else None
