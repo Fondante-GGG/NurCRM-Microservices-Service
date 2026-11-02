@@ -323,6 +323,117 @@ def _purchase_edit_effective(user):
     return can_edit_purchase_documents(user)
 
 
+# ─────────────────────────────────────────────────────────────
+# S1 (аудит 03.11): кто может менять роль и права
+# ─────────────────────────────────────────────────────────────
+ELEVATED_ROLES = ("owner", "admin")
+
+
+def _is_superuser(user):
+    return bool(getattr(user, "is_superuser", False))
+
+
+def _is_owner_or_admin(user):
+    from apps.warehouse.op_permissions import is_company_owner
+
+    return bool(user is not None and (is_company_owner(user) or getattr(user, "role", None) == "admin"))
+
+
+def _rights_denied(detail, field=None):
+    body = {"code": "permission_denied", "detail": detail, "required": "can_edit_employees"}
+    if field:
+        body["field"] = field
+    return PermissionDenied(detail=body)
+
+
+def _rights_value(instance, key):
+    """Текущее значение права так, как его видит фронт: NULL у can_view_*/опасных — «нет»
+    (у опасных — по умолчанию для роли), NULL у can_edit_* — «можно» (как раньше)."""
+    from apps.warehouse.op_permissions import OP_PERMISSION_FIELDS, has_op_permission
+
+    if instance is None:
+        return None
+    if key in OP_PERMISSION_FIELDS:
+        return has_op_permission(instance, key)
+    if key == "can_edit_purchase_documents":
+        return _purchase_edit_effective(instance)
+    raw = getattr(instance, key, None)
+    if key in READ_ONLY_FIELDS:
+        return raw is not False
+    if key.startswith("can_"):
+        return bool(raw)
+    return raw
+
+
+def _real_changes(data, instance, keys):
+    """Ключи из keys, которые в data действительно отличаются от текущих (с учётом NULL)."""
+    out = []
+    for k in keys:
+        if k not in data:
+            continue
+        new, cur = data[k], _rights_value(instance, k)
+        if k == "custom_role":
+            new, cur = getattr(new, "pk", new), getattr(instance, "custom_role_id", None)
+        elif k in READ_ONLY_FIELDS:
+            new = new is not False
+        elif k.startswith("can_"):
+            new = bool(new)
+        if new != cur:
+            out.append(k)
+    return out
+
+
+def _guard_self_rights(data, instance, current_user):
+    """Себе нельзя менять роль и права (can_*). Владелец компании может менять свои флаги can_*
+    (старый сайт после входа дописывает владельцу права сферы), но не свою роль.
+    Присланные без изменений значения пропускаются: клиенты шлют карточку целиком."""
+    if instance is None or current_user is None or _is_superuser(current_user):
+        return
+    if instance.pk != current_user.pk:
+        return
+    from apps.warehouse.op_permissions import is_company_owner
+
+    role_changed = _real_changes(data, instance, ("role", "custom_role"))
+    if role_changed:
+        raise _rights_denied("Свою роль поменять нельзя: это делает владелец или администратор.", role_changed[0])
+    if is_company_owner(current_user):
+        return
+    flags = _real_changes(data, instance, [k for k in data if k.startswith("can_")])
+    if flags:
+        raise _rights_denied("Свои права поменять нельзя: это делает владелец или администратор.", flags[0])
+
+
+def _guard_employee_rights(data, target, current_user):
+    """Права на чужую карточку (PATCH employees/{id}/ и создание):
+    роль admin выдаёт только владелец/админ, роль owner — только владелец;
+    карточку админа/владельца меняет только владелец/админ;
+    опасные права (склад) и «Редактор документов закупок» выдаёт только владелец/админ."""
+    from apps.warehouse.op_permissions import OP_PERMISSION_FIELDS, is_company_owner
+
+    if current_user is None or _is_superuser(current_user):
+        return
+    elevated_editor = _is_owner_or_admin(current_user)
+    if target is not None and getattr(target, "role", None) in ELEVATED_ROLES and not elevated_editor:
+        if data:
+            raise _rights_denied("Карточку администратора или владельца меняет только владелец или администратор.")
+    new_role = data.get("role", None)
+    cur_role = getattr(target, "role", None) if target is not None else None
+    if "role" in data and new_role != cur_role:
+        if new_role == "owner" and not is_company_owner(current_user):
+            raise _rights_denied("Роль «Владелец» выдаёт только владелец компании.", "role")
+        if new_role in ELEVATED_ROLES and not elevated_editor:
+            raise _rights_denied("Роль «Администратор» выдаёт только владелец или администратор.", "role")
+    danger = (_real_changes(data, target, list(OP_PERMISSION_FIELDS)) if target is not None
+              else [k for k in OP_PERMISSION_FIELDS if data.get(k)])
+    if danger and not elevated_editor:
+        raise _rights_denied("Опасные права выдаёт только владелец или администратор.", danger[0])
+    # опасное право, совпадающее с действующим (NULL = по умолчанию для роли), не записываем —
+    # иначе карточка, присланная целиком, превратила бы «по умолчанию» в явное «нет»
+    for k in OP_PERMISSION_FIELDS:
+        if k in data and k not in danger:
+            data.pop(k)
+
+
 def _check_purchase_edit_grant(data, instance, current_user):
     """Право «Редактор документов закупок» выдаёт/снимает владелец или администратор (01.11)."""
     from apps.warehouse.op_permissions import is_company_owner
@@ -505,6 +616,8 @@ class UserSerializer(serializers.ModelSerializer):
             for p in restricted_admin_permissions:
                 data[p] = False
                 raise serializers.ValidationError("Менеджеру запрещено изменять права доступа.")
+
+        _guard_self_rights(data, self.instance, current_user)  # S1 03.11: себе роль и права не меняем
 
         # проверка типов только для тех флагов, которые реально прислали
         for k, v in data.items():
@@ -692,6 +805,7 @@ class EmployeeCreateSerializer(EmployeeFieldsMixin, serializers.ModelSerializer)
 
         if getattr(current_user, "role", None) in ("manager", "salesperson"):
             raise serializers.ValidationError("У вас нет прав для создания сотрудников.")
+        _guard_employee_rights(data, None, current_user)  # S1 03.11: роль admin/owner — только владелец/админ
 
         company = getattr(current_user, "owned_company", None) or getattr(current_user, "company", None)
         if not company:
@@ -962,6 +1076,9 @@ class EmployeeUpdateSerializer(EmployeeFieldsMixin, serializers.ModelSerializer)
             "can_manage_lead_ad_spend",
             *READ_ONLY_FIELDS,
             "can_edit_purchase_documents",  # ТЗ редактор накладных 30.10
+            # S1 03.11: опасные права склада (раньше молча отбрасывались) — выдаёт владелец/админ
+            "can_post_negative_stock", "can_unpost_documents", "can_change_document_date",
+            "can_post_closed_period", "can_cash_negative",
             "funnel_grants",
             "branch_ids",
             *EMPLOYEE_CARD_FIELDS,  # ТЗ 29.10 Б-101
@@ -1000,6 +1117,7 @@ class EmployeeUpdateSerializer(EmployeeFieldsMixin, serializers.ModelSerializer)
                     raise serializers.ValidationError("Нельзя привязать сотрудника к чужому региону.")
 
         _check_purchase_edit_grant(data, target_user, current_user)  # ТЗ редактор накладных 30.10
+        _guard_employee_rights(data, target_user, current_user)  # S1 03.11: роль admin и опасные права
 
         branch_ids = data.get("branch_ids", None)
         if branch_ids is not None:

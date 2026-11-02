@@ -2,6 +2,12 @@
 
 Новые записи сверху. Единое ТЗ бэкенду 26.10.2026, разделы 8–11 (Б-52…Б-87).
 
+## 03.11.2026 — S1: роль и права сотрудника (дыра в правах)
+- `PATCH users/profile/`: себе нельзя поменять `role` / `custom_role` (никому, кроме суперпользователя) и любые `can_*` (всем, кроме владельца компании — старый сайт дописывает владельцу права сферы). Ответ 403 `{code: permission_denied, required: can_edit_employees, field}`. Присланные без изменений значения (карточка целиком) проходят; NULL и false у `can_view_*` — одно и то же.
+- `PATCH users/employees/{id}/` и `POST users/employees/create/`: роль `admin` выдаёт только владелец/админ, роль `owner` — только владелец; карточку админа/владельца меняет только владелец/админ (РОП и руководитель региона — нет).
+- Опасные права склада (`can_post_negative_stock`, `can_unpost_documents`, `can_change_document_date`, `can_post_closed_period`, `can_cash_negative`) теперь принимаются в `PATCH employees/{id}/` (раньше молча отбрасывались) — только от владельца/админа; значение, совпадающее с действующим по роли, не записывается (NULL «по умолчанию» не превращается в false).
+- `capabilities.features`: `employee_rights_guard`.
+
 ## 03.11.2026 — сверка API с front-market
 - Все 169 адресов, которые вызывает front-market (src/data, src/lib, страницы), есть в urls.py.
 - `client_phone` в списке и карточке чека (`main/pos/sales/`, `…/{id}/`): фронт строил по нему кнопку WhatsApp, а сервер поле не отдавал.

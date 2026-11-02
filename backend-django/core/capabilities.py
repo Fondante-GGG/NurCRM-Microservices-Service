@@ -41,6 +41,9 @@ FEATURES = (
     # 03.11 front-market: CashFlow.employee + ?employee=; миниатюры image_thumb_url; pos/sales payment_method=noncash
     # и списком через запятую; suppliers/receipts ?created_by=&amount_min=&amount_max=&product_search=
     "cashflow_employee", "product_thumbs", "sales_noncash_filter", "receipts_filters",
+    # 03.11 аудит S1: себе роль/права менять нельзя; роль admin и опасные права склада — только владелец/админ;
+    # PATCH employees/{id}/ теперь принимает can_post_negative_stock … can_cash_negative (раньше отбрасывал)
+    "employee_rights_guard",
 )
 
 
