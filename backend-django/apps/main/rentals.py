@@ -20,6 +20,7 @@ deposit_document скрыт для сотрудников без доступа 
 Штраф — строка в продаже; из денежного залога он удерживается («зачёт»).
 Выданные вещи уходят из остатка магазина и возвращаются при возврате.
 """
+import uuid
 from decimal import Decimal
 
 from django.core.cache import cache
@@ -286,6 +287,16 @@ class RentalListCreateAPIView(APIView):
             raise ValidationError({"status": "Допустимо: active, overdue, returned."})
         if qp.get("client"):
             qs = qs.filter(client_id=qp["client"])
+        # S5 (аудит 03.11): ?branch=<uuid> — прокаты филиала; ?branch=main — без филиала (главный склад)
+        br = (qp.get("branch") or "").strip()
+        if br:
+            if br.lower() == "main":
+                qs = qs.filter(branch__isnull=True)
+            else:
+                try:
+                    qs = qs.filter(branch_id=uuid.UUID(br))
+                except ValueError:
+                    raise ValidationError({"branch": "Некорректный UUID филиала."})
         # ТЗ Н-21: date_from/date_to — по дате выдачи
         try:
             if qp.get("date_from"):

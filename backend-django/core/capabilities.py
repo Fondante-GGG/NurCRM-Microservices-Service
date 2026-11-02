@@ -59,6 +59,7 @@ FEATURES = (
     "products_piece_sale",  # G5: products/list/?piece_sale=true|false
     "products_barcodes_filter",  # G6: products/list/?barcodes=a,b,c (основной или доп. код), до 500
     "supplier_products_page_size",  # G7: suppliers/{id}/products/?page_size= (до 500)
+    "rentals_branch_filter",  # S5: rentals/?branch=<uuid>|main
 )
 
 

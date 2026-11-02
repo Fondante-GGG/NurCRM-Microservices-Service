@@ -2,6 +2,10 @@
 
 Новые записи сверху. Единое ТЗ бэкенду 26.10.2026, разделы 8–11 (Б-52…Б-87).
 
+## 03.11.2026 — S5: прокат по филиалу
+- `GET rentals/?branch=<uuid>` — прокаты филиала (филиал смены, в которой выдан); `?branch=main` — без филиала; плохой UUID — 400.
+- `capabilities.features`: `rentals_branch_filter`.
+
 ## 03.11.2026 — G7: размер страницы у товаров поставщика
 - `GET main/suppliers/{id}/products/?page_size=` — до 500 (без параметра — 100, как раньше).
 - `capabilities.features`: `supplier_products_page_size`.
