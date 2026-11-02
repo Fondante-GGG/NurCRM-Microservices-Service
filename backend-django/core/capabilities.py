@@ -48,6 +48,7 @@ FEATURES = (
     "sales_own_only", "returns_search",
     "debt_pay_idempotency",  # S9: POST main/debts/{id}/pay/ — Idempotency-Key или idempotency_key
     "mass_incoming_purchase_price",  # G1: mass-incoming сохраняет purchase_price новой карточки всегда
+    "mass_incoming_branch",  # G2: mass-incoming {branch} или ?branch= — филиал новых карточек
 )
 
 

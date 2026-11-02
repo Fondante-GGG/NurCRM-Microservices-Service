@@ -167,6 +167,8 @@ class ProductMassIncomingAPIView(CompanyBranchRestrictedMixin, APIView):
         partial = _bool(request.data.get("partial"))
         errors = []
         try:
+            # G2 (03.11): новые карточки — в филиал из `branch` (тело) или ?branch=; без него — каталог компании
+            self._target_branch = self._resolve_target_branch(company, request)
             parsed = []
             for i, raw in enumerate(items):
                 try:
@@ -195,6 +197,39 @@ class ProductMassIncomingAPIView(CompanyBranchRestrictedMixin, APIView):
             {"created": created, "items": result, "errors": errors, "replayed": False},
             status=status.HTTP_201_CREATED if created else status.HTTP_200_OK,
         )
+
+    def _resolve_target_branch(self, company, request):
+        """Филиал для создаваемых карточек. Только по явному `branch` (тело или ?branch=), иначе None —
+        как раньше (карточка уровня компании). "main" — главный склад (None)."""
+        from uuid import UUID
+
+        from apps.main.models import Branch
+
+        raw = request.data.get("branch") if isinstance(request.data, dict) else None
+        if raw in (None, ""):
+            if not (request.query_params.get("branch") or "").strip():
+                return None
+            return self._auto_branch()  # та же проверка UUID / компании / доступа сотрудника
+        raw = str(raw).strip()
+        if raw.lower() == "main":
+            return None
+        try:
+            UUID(raw)
+        except (ValueError, TypeError):
+            raise MassIncomingError(400, "Некорректный UUID филиала.", code="branch_invalid")
+        branch = Branch.objects.filter(company=company, pk=raw).first()
+        if branch is None:
+            raise MassIncomingError(404, "Филиал не найден.", code="branch_not_found")
+        user = request.user
+        from apps.users.permissions_flags import is_privileged
+
+        if not is_privileged(user):
+            allowed = {str(x) for x in user.branch_memberships.values_list("branch_id", flat=True)}
+            if getattr(user, "branch_id", None):
+                allowed.add(str(user.branch_id))
+            if allowed and raw not in allowed:
+                raise MassIncomingError(403, "У вас нет доступа к этому филиалу.", code="branch_forbidden")
+        return branch
 
     # --- разбор ---
 
@@ -425,7 +460,7 @@ class ProductMassIncomingAPIView(CompanyBranchRestrictedMixin, APIView):
         purchase_price = p.get("purchase_price") or Decimal("0")
         product = Product(
             company=company,
-            branch=None,
+            branch=getattr(self, "_target_branch", None),
             name=p["name"],
             barcode=barcode,
             brand=brand,

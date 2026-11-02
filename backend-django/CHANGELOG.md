@@ -2,6 +2,10 @@
 
 Новые записи сверху. Единое ТЗ бэкенду 26.10.2026, разделы 8–11 (Б-52…Б-87).
 
+## 03.11.2026 — G2: массовый приход в филиал
+- `POST main/products/mass-incoming/`: `branch` в теле (или `?branch=`) — новые карточки создаются в этом филиале; `"main"` или без поля — каталог компании, как раньше. Чужой филиал — 404 `branch_not_found`, плохой UUID — 400 `branch_invalid`, филиал не из своих у сотрудника — 403 `branch_forbidden`.
+- `capabilities.features`: `mass_incoming_branch`.
+
 ## 03.11.2026 — G1: массовый приход сохраняет закупочную новой карточки
 - `POST main/products/mass-incoming/`, строка без `product_id` (создание): `purchase_price` сохраняется всегда; раньше — только когда цена считалась по наценке, иначе закупка новой карточки была 0. Наценка считается от неё.
 - `capabilities.features`: `mass_incoming_purchase_price`.

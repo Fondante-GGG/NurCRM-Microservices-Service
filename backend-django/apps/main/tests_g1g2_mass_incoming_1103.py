@@ -44,3 +44,38 @@ class MassIncomingG1G2Tests(TestCase):
         self.assertEqual(r.status_code, 201, r.content)
         p = Product.objects.get(company=self.company, barcode="2000000000028")
         self.assertEqual(p.purchase_price, Decimal("0"))
+
+    def test_g2_branch_in_body_and_query(self):
+        r = self.post([self.row("2000000000035", price="10")], branch=str(self.br.id))
+        self.assertEqual(r.status_code, 201, r.content)
+        self.assertEqual(Product.objects.get(barcode="2000000000035").branch_id, self.br.id)
+        r = self.post([self.row("2000000000042", price="10")], url=f"{URL}?branch={self.br2.id}")
+        self.assertEqual(r.status_code, 201, r.content)
+        self.assertEqual(Product.objects.get(barcode="2000000000042").branch_id, self.br2.id)
+
+    def test_g2_without_branch_company_catalog(self):
+        r = self.post([self.row("2000000000059", price="10")])
+        self.assertEqual(r.status_code, 201, r.content)
+        self.assertIsNone(Product.objects.get(barcode="2000000000059").branch_id)
+        r = self.post([self.row("2000000000066", price="10")], branch="main")
+        self.assertIsNone(Product.objects.get(barcode="2000000000066").branch_id)
+
+    def test_g2_foreign_or_bad_branch(self):
+        r = self.post([self.row("2000000000073", price="10")], branch=str(self.other_br.id))
+        self.assertEqual(r.status_code, 404, r.content)
+        self.assertEqual(r.json()["code"], "branch_not_found")
+        r = self.post([self.row("2000000000073", price="10")], branch="xx")
+        self.assertEqual(r.status_code, 400, r.content)
+        self.assertFalse(Product.objects.filter(barcode="2000000000073").exists())
+
+    def test_g2_employee_other_branch_forbidden(self):
+        emp = User.objects.create_user(email=f"e-{uuid.uuid4().hex}@t.com", password="x", company=self.company)
+        BranchMembership.objects.create(user=emp, branch=self.br, is_primary=True)
+        api = APIClient()
+        api.force_authenticate(emp)
+        r = api.post(URL, {"items": [self.row("2000000000080", price="10")], "branch": str(self.br2.id)},
+                     format="json")
+        self.assertEqual(r.status_code, 403, r.content)
+        r = api.post(URL, {"items": [self.row("2000000000080", price="10")], "branch": str(self.br.id)},
+                     format="json")
+        self.assertEqual(r.status_code, 201, r.content)
