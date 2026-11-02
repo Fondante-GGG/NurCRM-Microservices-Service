@@ -255,7 +255,8 @@ class ProductMassIncomingAPIView(CompanyBranchRestrictedMixin, APIView):
             price = _calc_price(purchase, extra["markup_percent"])
         return {
             **extra,
-            "purchase_price": purchase if from_markup else None,
+            # G1 (03.11): закупочная сохраняется всегда, а не только при расчёте цены по наценке
+            "purchase_price": purchase,
             "from_markup": from_markup,
             "kind": "create",
             "index": index,
