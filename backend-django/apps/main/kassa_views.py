@@ -14,7 +14,7 @@ from datetime import timedelta
 from decimal import Decimal
 
 from django.db import IntegrityError, transaction
-from django.db.models import DecimalField, F, OuterRef, Subquery, Sum, Value
+from django.db.models import DecimalField, F, OuterRef, Q, Subquery, Sum, Value
 from django.db.models.functions import Coalesce
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
@@ -1703,6 +1703,22 @@ class SaleReturnListAPIView(CompanyBranchRestrictedMixin, APIView):
                     qs = qs.filter(**{field: uuid.UUID(qp[param])})
                 except ValueError:
                     raise ValidationError({param: "Некорректный UUID."})
+        # S3 (аудит 03.11): кассир видит только свои возвраты; возвраты конкретного чека (?sale=) —
+        # всем, кто на кассе: без них касса не посчитает, сколько уже вернули по чеку коллеги.
+        from apps.users.permissions_flags import sees_all_sales
+        if not sees_all_sales(request.user) and not qp.get("sale"):
+            qs = qs.filter(user_id=request.user.pk)
+        # S3: поиск — номер чека (цифры), клиент (имя/телефон), товар, причина, кто оформил
+        search = (qp.get("search") or "").strip()
+        if search:
+            cond = (
+                Q(sale__client__full_name__icontains=search) | Q(sale__client__phone__icontains=search)
+                | Q(reason__icontains=search) | Q(sale__items__name_snapshot__icontains=search)
+                | Q(user__first_name__icontains=search) | Q(user__last_name__icontains=search)
+            )
+            if search.isdigit():
+                cond |= Q(sale__doc_number=int(search))
+            qs = qs.filter(cond).distinct()
         # id — стабильный порядок при равном created_at (страницы не пересекаются)
         qs = qs.order_by("-created_at", "-id")
         # ТЗ Н-07: страницы только если клиент передал page/page_size; иначе — голый массив

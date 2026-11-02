@@ -129,3 +129,18 @@ class PosAccess(permissions.BasePermission):
         if getattr(user, "can_use_pos", True) is False:
             raise denied("can_use_pos", "Работа на кассе отключена для вашей учётной записи.")
         return True
+
+
+# S3 (аудит 03.11): кто видит все чеки и возвраты компании, а кто — только свои
+SEES_ALL_SALES_FLAGS = ("can_view_analytics", "can_view_cashbox")
+
+
+def sees_all_sales(user) -> bool:
+    """Владелец/админ/суперпользователь, РОП и руководитель региона, а также «Аналитика» или «Касса и деньги»
+    (бухгалтер, управляющий, старший кассир) — все чеки. Остальные (кассир) — только свои,
+    как уже делали market.nurcrm.kg и front-market на своей стороне (user=<id>)."""
+    if user is None or not getattr(user, "is_authenticated", False):
+        return False
+    if is_privileged(user) or getattr(user, "role", None) in ("rop", "supervisor"):
+        return True
+    return has_any_flag(user, SEES_ALL_SALES_FLAGS)

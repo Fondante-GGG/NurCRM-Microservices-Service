@@ -44,6 +44,8 @@ FEATURES = (
     # 03.11 аудит S1: себе роль/права менять нельзя; роль admin и опасные права склада — только владелец/админ;
     # PATCH employees/{id}/ теперь принимает can_post_negative_stock … can_cash_negative (раньше отбрасывал)
     "employee_rights_guard",
+    # S3: pos/sales и pos/returns — кассиру только свои (сервер); pos/returns/?search=
+    "sales_own_only", "returns_search",
 )
 
 

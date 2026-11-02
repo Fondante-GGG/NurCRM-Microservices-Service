@@ -5002,6 +5002,12 @@ class SaleListAPIView(MarketCashierOnlyMixin, CompanyBranchRestrictedMixin, gene
                 | Q(items__product__alternate_barcodes__barcode=barcode)
             ).annotate(matched_item_name=Subquery(matched_items.values("name_snapshot")[:1])).distinct()
 
+        # S3 (аудит 03.11): кассир видит только свои чеки — теперь и на сервере, не только на фронте.
+        # Точный поиск чека по номеру (возврат по чеку коллеги) и чеки клиента (оплата долга) — как раньше.
+        from apps.users.permissions_flags import sees_all_sales
+        if not sees_all_sales(self.request.user) and not number and not client_param:
+            qs = qs.filter(user_id=self.request.user.pk)
+
         return qs
 
     def list(self, request, *args, **kwargs):
