@@ -5545,12 +5545,20 @@ class SupplierListAPIView(CompanyBranchRestrictedMixin, generics.ListAPIView):
         return self._filter_qs_company_branch(qs)
 
 
+class SupplierProductsPagination(PageNumberPagination):
+    """G7 (аудит 03.11): ?page_size= (до 500); без него — 100, как раньше."""
+    page_size = 100
+    page_size_query_param = "page_size"
+    max_page_size = 500
+
+
 class SupplierProductsListAPIView(CompanyBranchRestrictedMixin, generics.ListAPIView):
     """
     GET /api/main/suppliers/<uuid:supplier_id>/products/
     """
     permission_classes = [permissions.IsAuthenticated]
     serializer_class = ProductListSerializer
+    pagination_class = SupplierProductsPagination
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
     search_fields = ["name", "barcode", "article", "code"]
     ordering_fields = ["created_at", "updated_at", "name", "price", "quantity"]
