@@ -2,6 +2,11 @@
 
 Новые записи сверху. Единое ТЗ бэкенду 26.10.2026, разделы 8–11 (Б-52…Б-87).
 
+## 03.11.2026 — миниатюры фото товаров
+- `ProductImage.thumb`: при загрузке фото делается миниатюра WebP 320px по большей стороне (`products/<id>/thumbs/`); удаляется вместе с фото. Не получилось — фото всё равно сохраняется.
+- В API: `image_thumb_url` у каждой картинки (`images[]` в `main/products/list/`, карточка, POS) и у `ProductListSerializer`. `null` — миниатюры ещё нет, брать `image_url`.
+- Миграция main 0172 (колонка NULL, мгновенно). `manage.py make_product_thumbs [--dry-run] [--limit N] [--batch 200] [--company]` — для старых фото, можно прерывать.
+
 ## 03.11.2026 — выплаты зарплаты: id сотрудника в расходе
 - `CashFlow.employee` (необязательная ссылка на сотрудника своей компании): `POST/PATCH construction/cashflows/` принимает `employee`, в ответе `employee` и `employee_name`. Выплаты `main/market-salary/payouts/` (и их отмена) ставят его сами.
 - `?employee=<id>`: строки с `employee` — по нему, старые строки без него — по кассиру (как в ТЗ Н-19); `?employee_strict=1` — только по `employee`.

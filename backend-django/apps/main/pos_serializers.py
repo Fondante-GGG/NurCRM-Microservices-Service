@@ -95,10 +95,11 @@ class CustomCartItemCreateSerializer(serializers.Serializer):
 
 class ProductImageReadSerializer(serializers.ModelSerializer):
     image_url = serializers.SerializerMethodField()
+    image_thumb_url = serializers.SerializerMethodField()
 
     class Meta:
         model = ProductImage
-        fields = ("id", "image_url", "alt", "is_primary")
+        fields = ("id", "image_url", "image_thumb_url", "alt", "is_primary")
 
     def get_image_url(self, obj):
         if not obj.image:
@@ -106,6 +107,12 @@ class ProductImageReadSerializer(serializers.ModelSerializer):
         request = self.context.get("request")
         url = obj.image.url
         return request.build_absolute_uri(url) if request else url
+
+    def get_image_thumb_url(self, obj):
+        # 03.11: миниатюра 320px или null
+        from apps.main.serializers import file_abs_url
+
+        return file_abs_url(self.context.get("request"), getattr(obj, "thumb", None))
 
 
 # ⚠️ это serializer для CartItem (название у тебя старое, оставляю чтобы не ломать импорты)

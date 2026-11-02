@@ -172,13 +172,29 @@ class Price4Field(serializers.DecimalField):
         return f"{head}.{tail.ljust(2, '0')}"
 
 
+def file_abs_url(request, f):
+    """Абсолютный URL файла или None (03.11: общий для фото и миниатюр)."""
+    if not f or not getattr(f, "name", None):
+        return None
+    try:
+        url = f.url
+    except Exception:
+        return None
+    return request.build_absolute_uri(url) if request else url
+
+
 class ProductImageReadSerializer(serializers.ModelSerializer):
     image_url = serializers.SerializerMethodField()
+    # 03.11 front-market: миниатюра 320px; null — ещё не сделана, показывать image_url
+    image_thumb_url = serializers.SerializerMethodField()
 
     class Meta:
         model = ProductImage
-        fields = ["id", "image_url", "alt", "is_primary", "color", "created_at"]
+        fields = ["id", "image_url", "image_thumb_url", "alt", "is_primary", "color", "created_at"]
         read_only_fields = fields  # всё только на чтение тут
+
+    def get_image_thumb_url(self, obj):
+        return file_abs_url(self.context.get("request"), getattr(obj, "thumb", None))
 
     def get_image_url(self, obj):
         """
@@ -819,11 +835,15 @@ class ItemMakeNestedSerializer(serializers.ModelSerializer):
 
 class ProductImageSerializer(serializers.ModelSerializer):
     image_url = serializers.SerializerMethodField()
+    image_thumb_url = serializers.SerializerMethodField()  # 03.11: миниатюра 320px или null
 
     class Meta:
         model = ProductImage
-        fields = ["id", "image", "image_url", "alt", "is_primary", "color", "created_at"]
-        read_only_fields = ["id", "image_url", "created_at"]
+        fields = ["id", "image", "image_url", "image_thumb_url", "alt", "is_primary", "color", "created_at"]
+        read_only_fields = ["id", "image_url", "image_thumb_url", "created_at"]
+
+    def get_image_thumb_url(self, obj):
+        return file_abs_url(self.context.get("request"), getattr(obj, "thumb", None))
 
     def get_image_url(self, obj):
         req = self.context.get("request")
@@ -2987,6 +3007,7 @@ class ProductNestedSerializer(serializers.ModelSerializer):
 # Лёгкий сериализатор для списка товаров (минимальный набор полей)
 class ProductListSerializer(serializers.ModelSerializer):
     image_url = serializers.SerializerMethodField()
+    image_thumb_url = serializers.SerializerMethodField()
     purchase_price = Price4Field(max_digits=14, decimal_places=4, read_only=True)  # ТЗ 31.10 п.19
     is_favorite = serializers.BooleanField(read_only=True)
     shelf_life_days = serializers.IntegerField(read_only=True)
@@ -2999,10 +3020,24 @@ class ProductListSerializer(serializers.ModelSerializer):
             "quantity", "brand", "category",
             "hotkey_group",
             "upsell_priority", "upsell_excluded",
-            "image_url", "is_favorite",
+            "image_url", "image_thumb_url", "is_favorite",
             "expiration_date",
             "shelf_life_days",
         ]
+
+    def _first_image(self, obj):
+        imgs = getattr(obj, "images", None)
+        if not imgs:
+            return None
+        try:
+            return imgs.all()[0] if hasattr(imgs, "all") else imgs[0]
+        except Exception:
+            return None
+
+    def get_image_thumb_url(self, obj):
+        # 03.11: миниатюра того же фото, что image_url; null — показывать image_url
+        first = self._first_image(obj)
+        return file_abs_url(self.context.get("request"), getattr(first, "thumb", None)) if first else None
 
     def get_image_url(self, obj):
         imgs = getattr(obj, "images", None)

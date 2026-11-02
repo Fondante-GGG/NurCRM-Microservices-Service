@@ -65,6 +65,14 @@ def product_image_upload_to(instance, filename: str) -> str:
     return f"products/{instance.product_id}/{uuid.uuid4().hex}.webp"
 
 
+def product_image_thumb_upload_to(instance, filename: str) -> str:
+    # 03.11 front-market: миниатюра рядом с оригиналом, в подпапке thumbs
+    return f"products/{instance.product_id}/thumbs/{uuid.uuid4().hex}.webp"
+
+
+PRODUCT_THUMB_SIZE = 320  # px по большей стороне
+
+
 # ==========================
 # Contact
 # ==========================
@@ -1641,6 +1649,11 @@ class ProductImage(models.Model):
     product = models.ForeignKey("Product", on_delete=models.CASCADE, related_name="images", verbose_name="Товар")
 
     image = models.ImageField(upload_to=product_image_upload_to, null=True, blank=True, verbose_name="Изображение (WebP)")
+    # 03.11 front-market: миниатюра 320px WebP для кассы и списков (оригиналы бывают 4080×3072)
+    thumb = models.ImageField(
+        upload_to=product_image_thumb_upload_to, null=True, blank=True, max_length=255,
+        verbose_name="Миниатюра (WebP 320px)",
+    )
     alt = models.CharField(max_length=255, blank=True, verbose_name="Alt-текст")
     is_primary = models.BooleanField(default=False, verbose_name="Основное изображение")
     # ТЗ Н-26: фото конкретного цвета (название цвета варианта), пусто = общее фото
@@ -1694,21 +1707,55 @@ class ProductImage(models.Model):
                 self.branch_id = self.product.branch_id
 
         # Если загружен файл (любой формат) — преобразуем в WebP и перезапишем self.image
+        old_thumb = None
         if self.image and hasattr(self.image, "file"):
+            new_upload = not getattr(self.image, "_committed", True)
             try:
                 self.image = self._convert_to_webp(self.image)
             except Exception as e:
                 raise ValidationError({"image": f"Не удалось конвертировать в WebP: {e}"})
+            # 03.11: новое фото — новая миниатюра; не вышло — фото всё равно сохраняем (команда доделает)
+            if new_upload or not self.thumb:
+                old_thumb = self.thumb.name if self.thumb else None
+                try:
+                    self.image.seek(0)
+                    self.thumb = self.make_thumb_content(self.image)
+                except Exception:
+                    self.thumb = None
+                self.image.seek(0)
 
         super().save(*args, **kwargs)
+        if old_thumb and old_thumb != (self.thumb.name if self.thumb else None):
+            try:
+                st = self._meta.get_field("thumb").storage
+                if st.exists(old_thumb):
+                    st.delete(old_thumb)
+            except Exception:
+                pass
 
     def delete(self, *args, **kwargs):
-        storage = self.image.storage if self.image else None
-        name = self.image.name if self.image else None
+        files = [(f.storage, f.name) for f in (self.image, self.thumb) if f]
         super().delete(*args, **kwargs)
-        # удалим файл из хранилища
-        if storage and name and storage.exists(name):
-            storage.delete(name)
+        # удалим файлы из хранилища
+        for storage, name in files:
+            if storage and name and storage.exists(name):
+                storage.delete(name)
+
+    @staticmethod
+    def make_thumb_content(fileobj, size: int = PRODUCT_THUMB_SIZE) -> ContentFile:
+        """Миниатюра WebP: большая сторона не больше size, пропорции сохраняются."""
+        fileobj.seek(0)
+        im = Image.open(fileobj)
+        im.draft("RGB", (size * 2, size * 2))  # JPEG: читаем сразу уменьшенным — меньше памяти
+        # поворот по EXIF не делаем: оригинал (WebP без EXIF) показывается так же
+        if im.mode not in ("RGB", "L"):
+            im = im.convert("RGB")
+        im.thumbnail((size, size), Image.LANCZOS)
+        buf = io.BytesIO()
+        im.save(buf, format="WEBP", quality=78, method=4)
+        content = ContentFile(buf.getvalue())
+        content.name = f"{uuid.uuid4().hex}.webp"
+        return content
 
     @staticmethod
     def _convert_to_webp(field_file) -> ContentFile:
