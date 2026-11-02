@@ -290,6 +290,151 @@ def _context_instruction(ctx):
     )
 
 
+# ----------------------------------------------------------------------------- инструменты только для веба
+
+def _sold_statuses():
+    from apps.main.models import Sale
+    return [Sale.Status.PAID, Sale.Status.PARTIALLY_RETURNED]
+
+
+def fn_get_clients_overview(company, kind="top", days=30, limit=10, branch=None):
+    """Клиенты магазина: лучшие за N дней (сумма, чеков, последняя покупка, долг) или «уснувшие» —
+    покупали раньше, но не приходят N дней. Только своя компания."""
+    from datetime import timedelta
+    from django.db.models import Count, Max, Sum
+    from apps.main.models import Client, Sale
+
+    days = min(max(int(days or 30), 1), 365)
+    lim = min(max(int(limit or 10), 1), 30)
+    since = timezone.now() - timedelta(days=days)
+    sales = Sale.objects.filter(company=company, client__isnull=False, client__company=company, status__in=_sold_statuses())
+    if branch:
+        sales = sales.filter(branch__company=company, branch__name__icontains=str(branch)[:60])
+    total_clients = Client.objects.filter(company=company).count()
+    if kind == "sleeping":
+        rows = (sales.values("client_id").annotate(last=Max("paid_at"), cnt=Count("id"), tot=Sum("total"))
+                .filter(last__lt=since).order_by("-tot")[:lim])
+    else:
+        kind = "top"
+        rows = (sales.filter(paid_at__gte=since).values("client_id")
+                .annotate(last=Max("paid_at"), cnt=Count("id"), tot=Sum("total")).order_by("-tot")[:lim])
+    rows = list(rows)
+    clients = {c.id: c for c in Client.objects.filter(company=company, id__in=[r["client_id"] for r in rows])}
+    debts = {r["client_id"]: r["d"] for r in sales.filter(client_id__in=list(clients)).values("client_id").annotate(d=Sum("debt_remaining"))}
+    out = []
+    for r in rows:
+        c = clients.get(r["client_id"])
+        if c is None:
+            continue
+        out.append({
+            "name": c.full_name or "Без имени",
+            "phone": c.phone or "",
+            "purchases_count": r["cnt"] or 0,
+            "purchases_total": str(r["tot"] or 0),
+            "last_purchase_date": r["last"].date().isoformat() if r["last"] else None,
+            "debt": str(debts.get(r["client_id"]) or 0),
+        })
+    new_clients = Client.objects.filter(company=company, created_at__gte=since).count()
+    return {"kind": kind, "days": days, "total_clients": total_clients, "new_clients_in_period": new_clients,
+            "clients": out, "total_count": len(out)}
+
+
+def fn_get_product_sales(company, query, date_from=None, date_to=None, branch=None):
+    """Продажи одного товара за период: штук, выручка, чеков, по дням (до 31 дня). Только своя компания."""
+    from datetime import timedelta
+    from django.db.models import Count, F, Q, Sum
+    from django.db.models.functions import TruncDate
+    from apps.main.models import Product, SaleItem
+    from apps.main.telegram_bot.services.ai_analytics_functions import _parse_period_dates
+
+    q = str(query or "").strip()[:120]
+    if not q:
+        return {"found": False, "detail": "Не указан товар."}
+    pqs = Product.objects.filter(company=company)
+    prod = (pqs.filter(Q(name__iexact=q) | Q(barcode=q) | Q(code=q)).first() or pqs.filter(name__icontains=q).first())
+    if prod is None:
+        return {"found": False, "query": q, "detail": f"Товар «{q}» не найден."}
+    if not (date_from or date_to):
+        date_from = timezone.localdate().replace(day=1).isoformat()
+        date_to = timezone.localdate().isoformat()
+    start, end = _parse_period_dates(date_from, date_to)
+    items = SaleItem.objects.filter(product=prod, sale__company=company, sale__status__in=_sold_statuses(),
+                                    sale__paid_at__gte=start, sale__paid_at__lt=end)
+    if branch:
+        items = items.filter(sale__branch__name__icontains=str(branch)[:60])
+    rev = F("unit_price") * F("quantity") - F("line_discount")
+    agg = items.aggregate(qty=Sum("quantity"), rev=Sum(rev), checks=Count("sale_id", distinct=True))
+    by_day = list(items.annotate(d=TruncDate("sale__paid_at")).values("d").annotate(qty=Sum("quantity"), rev=Sum(rev)).order_by("d"))
+    return {
+        "found": True, "name": prod.name, "barcode": prod.barcode, "stock_now": float(prod.quantity or 0),
+        "period": {"from": start.date().isoformat(), "to": (end - timedelta(days=1)).date().isoformat()},
+        "quantity": float(agg["qty"] or 0), "revenue": str(agg["rev"] or 0), "checks": agg["checks"] or 0,
+        "by_day": [{"date": r["d"].isoformat() if r["d"] else None, "quantity": float(r["qty"] or 0), "revenue": str(r["rev"] or 0)}
+                   for r in by_day[-31:]],
+    }
+
+
+WEB_TOOL_DECLARATIONS = [
+    {
+        "name": "get_clients_overview",
+        "description": "Клиенты магазина: лучшие покупатели за N дней (сумма покупок, число чеков, последняя покупка, долг) "
+                       "или «уснувшие» — покупали раньше, но не приходят N дней. Плюс сколько всего клиентов и новых за период.",
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "kind": {"type": "STRING", "description": "'top' — лучшие за период, 'sleeping' — перестали покупать"},
+                "days": {"type": "INTEGER", "description": "Период в днях (по умолчанию 30)"},
+                "limit": {"type": "INTEGER", "description": "Сколько клиентов (до 30)"},
+            },
+        },
+    },
+    {
+        "name": "get_product_sales",
+        "description": "Продажи одного товара за период: сколько штук продано, выручка, чеков, разбивка по дням и остаток сейчас.",
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "query": {"type": "STRING", "description": "Название товара или штрихкод"},
+                "date_from": {"type": "STRING", "description": "Начало периода (ГГГГ-ММ-ДД), по умолчанию начало месяца"},
+                "date_to": {"type": "STRING", "description": "Конец периода (ГГГГ-ММ-ДД)"},
+            },
+            "required": ["query"],
+        },
+    },
+]
+WEB_FUNCTIONS = {"get_clients_overview": fn_get_clients_overview, "get_product_sales": fn_get_product_sales}
+
+# Права раздела, без которых допущенный человек (не владелец и не админ) не получает инструмент.
+TOOL_RIGHTS = {
+    "clients": ({"get_debtors", "get_client", "get_clients_overview"}, ("can_view_clients", "can_view_debts")),
+    "stock": ({"get_stock", "get_dead_stock", "get_product", "get_stock_alerts", "get_expiring", "get_product_sales"},
+              ("can_view_products",)),
+}
+
+
+def _rights_blocked(user, company):
+    """Инструменты, закрытые правами пользователя. Владельцу и администратору — ничего."""
+    if user is None or _is_owner(user, company) or getattr(user, "role", "") in ("owner", "admin"):
+        return set()
+    out = set()
+    for names, flags in TOOL_RIGHTS.values():
+        if not any(getattr(user, f, False) for f in flags):
+            out |= names
+    return out
+
+
+def _run_web_tool(company, name, args):
+    fn = WEB_FUNCTIONS[name]
+    try:
+        import inspect
+        allowed = set(inspect.signature(fn).parameters) - {"company"}
+        clean = {k: v for k, v in (args or {}).items() if v is not None and k in allowed}
+        return fn(company=company, **clean)
+    except Exception as e:  # ошибка — модели текстом, без падения ответа
+        log.warning("ai advisor web tool %s failed: %s", name, e)
+        return {"error": "Не удалось получить данные."}
+
+
 def _ask(company, question, history, lang, user=None, context=None):
     from apps.main.telegram_bot.services import ai_service
     from apps.main.telegram_bot.services.ai_analytics_functions import AI_TOOL_DECLARATIONS, execute_ai_function
@@ -297,8 +442,9 @@ def _ask(company, question, history, lang, user=None, context=None):
     s = _settings(company)
     hidden = _hidden_kinds(user, company, s)
     blocked = set().union(*(HIDDEN_TOOLS[k] for k in hidden)) if hidden else set()
+    blocked |= _rights_blocked(user, company)
     parts = tuple(p for k in hidden for p in HIDDEN_KEY_PARTS[k])
-    tools = [t for t in AI_TOOL_DECLARATIONS if t.get("name") not in blocked]
+    tools = [t for t in list(AI_TOOL_DECLARATIONS) + WEB_TOOL_DECLARATIONS if t.get("name") not in blocked]
     instruction = _instruction(company, s, lang) + _context_instruction(_clean_context(context))
     if hidden:
         names = {"salary": "зарплаты", "money": "прибыль, себестоимость и движение денег", "phones": "телефоны клиентов"}
@@ -308,7 +454,10 @@ def _ask(company, question, history, lang, user=None, context=None):
     def run_tool(name, args):
         if name in blocked:
             return {"error": "Доступ к этим данным закрыт владельцем."}
-        res = execute_ai_function(company, name, args, ctx=ctx)
+        if name in WEB_FUNCTIONS:
+            res = _run_web_tool(company, name, args)
+        else:
+            res = execute_ai_function(company, name, args, ctx=ctx)
         return _scrub(res, parts) if parts else res
     contents = []
     for h in (history or [])[-6:]:

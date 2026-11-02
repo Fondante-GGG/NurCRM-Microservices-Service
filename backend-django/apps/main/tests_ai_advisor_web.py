@@ -270,3 +270,87 @@ class AiAdvisorContextTests(TestCase):
         ins = self.ask({"context": json.dumps({"page": "Касса", "summary": "в чеке 3 товара на 450 сом"})}, voice=True)
         self.assertIn("в чеке 3 товара", ins)
 
+
+@override_settings(CACHES={"default": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache"}})
+class AiAdvisorWebToolsTests(TestCase):
+    """Новые инструменты: клиенты и продажи товара — только своя компания и по правам."""
+
+    def setUp(self):
+        from decimal import Decimal
+        from apps.construction.models import Cashbox
+        from apps.main.models import Client, Product, Sale, SaleItem
+        cache.clear()
+        self.owner = User.objects.create_user(email="tools@adv.test", password="p12345678", role="owner")
+        self.company = Company.objects.create(name="Tools Shop", slug="tools-shop", owner=self.owner)
+        self.owner.company = self.company; self.owner.owned_company = self.company; self.owner.save()
+        TelegramBotSettings.objects.update_or_create(company=self.company, defaults={"ai_key": GOOD})
+        self.o = APIClient(); self.o.force_authenticate(self.owner)
+        # чужая компания с теми же названиями
+        self.other_owner = User.objects.create_user(email="tools-x@adv.test", password="p12345678", role="owner")
+        self.other = Company.objects.create(name="Other Tools", slug="other-tools", owner=self.other_owner)
+
+        def fill(company, user, client_name, total):
+            cb = Cashbox.objects.create(company=company, name="Касса")
+            p = Product.objects.create(name="Мыло детское", company=company, price=Decimal("50"), quantity=Decimal("7"))
+            c = Client.objects.create(full_name=client_name, phone="+996555000111", company=company)
+            s = Sale.objects.create(company=company, cashbox=cb, user=user, client=c, status=Sale.Status.PAID,
+                                    total=Decimal(total), subtotal=Decimal(total), paid_at=timezone.now())
+            SaleItem.objects.create(company=company, sale=s, product=p, unit_price=Decimal("50"), quantity=Decimal(total) / 50, name_snapshot=p.name)
+        fill(self.company, self.owner, "Айгуль", "150")
+        fill(self.other, self.other_owner, "Чужой клиент", "5000")
+
+    def test_clients_overview_only_own_company(self):
+        from apps.main import ai_advisor_web as w
+        r = w.fn_get_clients_overview(self.company, kind="top", days=30)
+        self.assertEqual([c["name"] for c in r["clients"]], ["Айгуль"])
+        self.assertEqual(r["total_clients"], 1)
+        self.assertEqual(w.fn_get_clients_overview(self.company, kind="sleeping", days=30)["clients"], [])
+
+    def test_product_sales_only_own_company(self):
+        from apps.main import ai_advisor_web as w
+        r = w.fn_get_product_sales(self.company, "Мыло")  # sqlite: LIKE без учёта регистра только для латиницы
+        self.assertTrue(r["found"])
+        self.assertEqual(r["quantity"], 3.0)
+        self.assertEqual(r["checks"], 1)
+        self.assertEqual(len(r["by_day"]), 1)
+        self.assertFalse(w.fn_get_product_sales(self.company, "нет такого")["found"])
+
+    def test_tools_offered_and_run_through_ask(self):
+        seen = {}
+
+        def fake(api_key, **kw):
+            seen["tools"] = {t["name"] for t in kw["tools"]}
+            seen["clients"] = kw["execute_tool_fn"]("get_clients_overview", {"kind": "top", "bogus": 1})
+            return "ok", "m", []
+        with mock.patch("apps.main.telegram_bot.services.ai_service.generate_chat_response_with_tools", side_effect=fake):
+            self.assertEqual(self.o.post("/api/users/ai-advisor/ask/", {"question": "лучшие клиенты"}, format="json").status_code, 200)
+        self.assertTrue({"get_clients_overview", "get_product_sales", "get_stock"} <= seen["tools"])
+        self.assertEqual([c["name"] for c in seen["clients"]["clients"]], ["Айгуль"])
+
+    def test_allowed_user_gets_tools_by_rights_and_no_phones(self):
+        cashier = User.objects.create_user(email="cash@adv.test", password="p12345678", company=self.company)
+        self.o.put("/api/users/ai-advisor/settings/", {"allowed_user_ids": [str(cashier.pk)]}, format="json")
+        u = APIClient(); u.force_authenticate(cashier)
+        seen = {}
+
+        def fake(api_key, **kw):
+            seen["tools"] = {t["name"] for t in kw["tools"]}
+            seen["blocked"] = kw["execute_tool_fn"]("get_clients_overview", {})
+            return "ok", "m", []
+        p = mock.patch("apps.main.telegram_bot.services.ai_service.generate_chat_response_with_tools", side_effect=fake)
+        with p:
+            u.post("/api/users/ai-advisor/ask/", {"question": "x"}, format="json")
+        self.assertNotIn("get_clients_overview", seen["tools"]); self.assertNotIn("get_debtors", seen["tools"])
+        self.assertNotIn("get_product_sales", seen["tools"]); self.assertNotIn("get_stock", seen["tools"])
+        self.assertIn("error", seen["blocked"])
+        cashier.can_view_clients = True; cashier.can_view_products = True; cashier.save()
+
+        def fake2(api_key, **kw):
+            seen["tools"] = {t["name"] for t in kw["tools"]}
+            seen["row"] = kw["execute_tool_fn"]("get_clients_overview", {})["clients"][0]
+            return "ok", "m", []
+        with mock.patch("apps.main.telegram_bot.services.ai_service.generate_chat_response_with_tools", side_effect=fake2):
+            u.post("/api/users/ai-advisor/ask/", {"question": "x"}, format="json")
+        self.assertIn("get_clients_overview", seen["tools"]); self.assertIn("get_stock", seen["tools"])
+        self.assertEqual(seen["row"]["name"], "Айгуль")
+        self.assertNotIn("phone", seen["row"])  # телефоны владелец не открыл
