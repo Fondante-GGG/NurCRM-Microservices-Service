@@ -103,12 +103,20 @@ class CashFlowCheckView(CompanyBranchScopedMixin, APIView):
         flow = self._scoped_queryset(CashFlow.objects.all()).filter(id=pk).first()
         if flow is None:
             raise NotFound({"detail": "Движение кассы не найдено."})
-        raw = request.data.get("checked", True)
-        checked = raw if isinstance(raw, bool) else str(raw).strip().lower() in ("true", "1", "yes")
-        fields = {"checked_at": timezone.now() if checked else None, "checked_by": user if checked else None}
+        # S7 (аудит 03.11): без поля checked, но с note — меняется только заметка (отметка и кто проверил
+        # остаются). Пустое тело — «проверено», как раньше. Повторное checked=true не перезаписывает время и автора.
+        fields = {}
+        if "checked" in request.data or "note" not in request.data:
+            raw = request.data.get("checked", True)
+            checked = raw if isinstance(raw, bool) else str(raw).strip().lower() in ("true", "1", "yes")
+            if not checked:
+                fields = {"checked_at": None, "checked_by": None}
+            elif flow.checked_at is None:
+                fields = {"checked_at": timezone.now(), "checked_by": user}
         if "note" in request.data:
             fields["accountant_note"] = str(request.data.get("note") or "")[:2000]
-        CashFlow.objects.filter(pk=flow.pk).update(**fields)  # update(): деньги и валидации не трогаем
+        if fields:
+            CashFlow.objects.filter(pk=flow.pk).update(**fields)  # update(): деньги и валидации не трогаем
         flow.refresh_from_db()
         return Response({
             "id": str(flow.id),
