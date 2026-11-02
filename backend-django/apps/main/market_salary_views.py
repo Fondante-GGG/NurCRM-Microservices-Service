@@ -274,6 +274,10 @@ class MarketSalaryPayoutListCreateAPIView(APIView):
                     # 03.11: кому выплачено — отдельным полем, не только текстом в названии
                     CashFlow.objects.filter(pk=cf.pk).update(employee=employee)
                     cf.employee = employee
+                if cf is not None and (pf or pt):
+                    # S6 (аудит 03.11): период выплаты — в расходе отдельными полями
+                    CashFlow.objects.filter(pk=cf.pk).update(salary_period_from=pf, salary_period_to=pt)
+                    cf.salary_period_from, cf.salary_period_to = pf, pt
                 payout.cashflow = cf
                 if cf is not None and payout.cashbox_id is None:
                     payout.cashbox = cf.cashbox

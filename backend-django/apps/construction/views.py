@@ -775,6 +775,25 @@ class CashFlowListCreateView(CompanyBranchScopedMixin, generics.ListCreateAPIVie
             else:
                 qs = qs.filter(Q(employee_id=employee_id) | Q(employee__isnull=True, cashier_id=employee_id))
 
+        # S6 (аудит 03.11): ?salary_period=YYYY-MM — выплаты, чей период пересекает месяц;
+        # ?salary_period_from=&salary_period_to= — пересекает отрезок. Строки без периода не попадают.
+        sp = (qp.get("salary_period") or "").strip()
+        sp_from = (qp.get("salary_period_from") or "").strip()
+        sp_to = (qp.get("salary_period_to") or "").strip()
+        if sp or sp_from or sp_to:
+            from apps.construction.serializers import parse_salary_period
+            from rest_framework import serializers as _s
+
+            try:
+                a, b = parse_salary_period(sp) if sp else parse_salary_period({"from": sp_from, "to": sp_to})
+            except _s.ValidationError as e:
+                raise ValidationError({"salary_period": e.detail})
+            qs = qs.filter(Q(salary_period_from__isnull=False) | Q(salary_period_to__isnull=False))
+            if b:
+                qs = qs.filter(Q(salary_period_from__lte=b) | Q(salary_period_from__isnull=True))
+            if a:
+                qs = qs.filter(Q(salary_period_to__gte=a) | Q(salary_period_to__isnull=True))
+
         # ✅ по категории: ?category=<uuid>
         category_id = qp.get("category")
         if category_id:

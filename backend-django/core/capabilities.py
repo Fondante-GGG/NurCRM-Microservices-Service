@@ -53,6 +53,8 @@ FEATURES = (
     "cashflow_check_note_only",  # S7: cashflows/{id}/check/ {note} без checked — отметку не трогает
     # S4: construction/shifts/?date_from=&date_to= (по opened_at); pos/cart-item-deletions/ даты, user, search
     "shifts_date_filter", "cart_deletions_filters",
+    # S6: CashFlow.salary_period ("YYYY-MM" или {from,to}), фильтр ?salary_period= / ?salary_period_from=&_to=
+    "cashflow_salary_period",
 )
 
 

@@ -638,6 +638,68 @@ PURPOSE_SOURCE_KINDS = (
 )
 
 
+class SalaryPeriodField(serializers.Field):
+    """S6 (аудит 03.11): период зарплаты расхода. Пишется "YYYY-MM" (весь месяц) или {"from": "YYYY-MM-DD",
+    "to": "YYYY-MM-DD"}; null — очистить. Читается так же: "YYYY-MM", если это ровно месяц, иначе {from, to}."""
+
+    def __init__(self, **kwargs):
+        kwargs.setdefault("source", "*")
+        kwargs.setdefault("required", False)
+        kwargs.setdefault("allow_null", True)
+        super().__init__(**kwargs)
+
+    def validate_empty_values(self, data):
+        if data is None:
+            return (True, {"salary_period_from": None, "salary_period_to": None})
+        return super().validate_empty_values(data)
+
+    def to_representation(self, obj):
+        return salary_period_repr(getattr(obj, "salary_period_from", None), getattr(obj, "salary_period_to", None))
+
+    def to_internal_value(self, data):
+        a, b = parse_salary_period(data)
+        return {"salary_period_from": a, "salary_period_to": b}
+
+
+def salary_period_repr(a, b):
+    import calendar
+
+    if not a and not b:
+        return None
+    if a and b and a.day == 1 and a.year == b.year and a.month == b.month \
+            and b.day == calendar.monthrange(b.year, b.month)[1]:
+        return f"{a.year:04d}-{a.month:02d}"
+    return {"from": a.isoformat() if a else None, "to": b.isoformat() if b else None}
+
+
+def parse_salary_period(data):
+    """"YYYY-MM" | {"from","to"} -> (date, date). Ошибка — ValidationError с понятным текстом."""
+    import calendar
+    import re
+    from datetime import date
+
+    from django.utils.dateparse import parse_date
+
+    if data in ("", None):
+        return None, None
+    if isinstance(data, str):
+        m = re.fullmatch(r"\s*(\d{4})-(\d{2})\s*", data)
+        if not m or not 1 <= int(m.group(2)) <= 12:
+            raise serializers.ValidationError('Период: "YYYY-MM" или {"from": "YYYY-MM-DD", "to": "YYYY-MM-DD"}.')
+        y, mo = int(m.group(1)), int(m.group(2))
+        return date(y, mo, 1), date(y, mo, calendar.monthrange(y, mo)[1])
+    if isinstance(data, dict):
+        raw_a, raw_b = data.get("from"), data.get("to")
+        a = parse_date(str(raw_a)) if raw_a not in (None, "") else None
+        b = parse_date(str(raw_b)) if raw_b not in (None, "") else None
+        if (raw_a not in (None, "") and a is None) or (raw_b not in (None, "") and b is None) or not (a or b):
+            raise serializers.ValidationError("Период: даты from/to в формате YYYY-MM-DD.")
+        if a and b and a > b:
+            raise serializers.ValidationError("Период: from позже to.")
+        return a, b
+    raise serializers.ValidationError('Период: "YYYY-MM" или {"from", "to"}.')
+
+
 class CashFlowSerializer(CompanyBranchReadOnlyMixin):
     cashbox = serializers.PrimaryKeyRelatedField(queryset=Cashbox.objects.all())
     cashbox_name = serializers.SerializerMethodField()
@@ -665,6 +727,7 @@ class CashFlowSerializer(CompanyBranchReadOnlyMixin):
         queryset=User.objects.none(), required=False, allow_null=True,
     )
     employee_name = serializers.SerializerMethodField()
+    salary_period = SalaryPeriodField()  # S6 (аудит 03.11)
     # Алиас для аналитики Производства (фронт читает user_name|created_by_name|...).
     user_name = serializers.SerializerMethodField()
 
@@ -702,6 +765,7 @@ class CashFlowSerializer(CompanyBranchReadOnlyMixin):
             "cashier_display",
             "employee",
             "employee_name",
+            "salary_period",
             "user_name",
             "request_kind",
             "target_flow",

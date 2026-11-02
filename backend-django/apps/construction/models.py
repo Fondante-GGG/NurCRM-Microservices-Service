@@ -1198,6 +1198,9 @@ class CashFlow(models.Model):
         related_name="paid_cash_flows",
         verbose_name="Сотрудник (кому выплата)",
     )
+    # S6 (аудит 03.11): за какой период зарплата (месяц YYYY-MM или с/по). Раньше фронт дописывал «· за 10.2026» в название.
+    salary_period_from = models.DateField(null=True, blank=True, verbose_name="Зарплата: период с")
+    salary_period_to = models.DateField(null=True, blank=True, verbose_name="Зарплата: период по")
     category = models.ForeignKey(
         "CashFlowCategory",
         on_delete=models.SET_NULL,

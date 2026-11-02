@@ -2,6 +2,13 @@
 
 Новые записи сверху. Единое ТЗ бэкенду 26.10.2026, разделы 8–11 (Б-52…Б-87).
 
+## 03.11.2026 — S6: период зарплаты у расхода
+- `CashFlow.salary_period_from` / `salary_period_to` (даты, необязательные). В API `construction/cashflows/` — поле `salary_period`: на запись `"YYYY-MM"` (весь месяц) или `{"from": "YYYY-MM-DD", "to": "YYYY-MM-DD"}`, `null` — очистить; на чтение `"YYYY-MM"`, если ровно месяц, иначе `{from, to}`, без периода — `null`. Без поля — как раньше (PATCH период не трогает).
+- Фильтр `?salary_period=YYYY-MM` (период пересекает месяц) или `?salary_period_from=&salary_period_to=`; строки без периода в такой выборке не попадают.
+- Выплаты `main/market-salary/payouts/` с `period_from/period_to` записывают период в расход сами.
+- Миграция construction 0040 (Postgres: две колонки `date NULL` без значения по умолчанию — мгновенно, IF NOT EXISTS, atomic=False, без индексов).
+- `capabilities.features`: `cashflow_salary_period`.
+
 ## 03.11.2026 — S4: фильтры смен и журнала удалений из корзины
 - `GET construction/shifts/?date_from=&date_to=` — по дате открытия смены (YYYY-MM-DD, включительно); плохая дата — 400.
 - `GET main/pos/cart-item-deletions/`: `date_from` / `date_to` (дата или дата-время, по времени удаления), `user` (кто удалил), `search` (название или штрихкод товара); порядок — новые сверху.
