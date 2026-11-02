@@ -2,6 +2,10 @@
 
 Новые записи сверху. Единое ТЗ бэкенду 26.10.2026, разделы 8–11 (Б-52…Б-87).
 
+## 03.11.2026 — G4: фильтр «акционные» в списке товаров
+- `GET main/products/list/?has_promotion=true` — товары с галочкой «Акционный товар» и хотя бы одной ступенью скидки; `false` — остальные.
+- `capabilities.features`: `products_has_promotion`.
+
 ## 03.11.2026 — S6: период зарплаты у расхода
 - `CashFlow.salary_period_from` / `salary_period_to` (даты, необязательные). В API `construction/cashflows/` — поле `salary_period`: на запись `"YYYY-MM"` (весь месяц) или `{"from": "YYYY-MM-DD", "to": "YYYY-MM-DD"}`, `null` — очистить; на чтение `"YYYY-MM"`, если ровно месяц, иначе `{from, to}`, без периода — `null`. Без поля — как раньше (PATCH период не трогает).
 - Фильтр `?salary_period=YYYY-MM` (период пересекает месяц) или `?salary_period_from=&salary_period_to=`; строки без периода в такой выборке не попадают.

@@ -9,7 +9,7 @@ from decimal import Decimal, InvalidOperation
 from django.db.models import Exists, F, OuterRef, Q
 from django.utils import timezone
 
-from apps.main.models import Product, Sale, SaleItem
+from apps.main.models import Product, ProductPromotionTier, Sale, SaleItem
 
 VALID_KINDS = {c[0] for c in Product.Kind.choices}
 VALID_PRESETS = {
@@ -230,6 +230,13 @@ def apply_product_list_filters(qs, query_params):
 
                 raise ValidationError({param: "Число."})
             qs = qs.filter(**{lookup: value})
+
+    # G4 (аудит 03.11): ?has_promotion=true — акционные (галочка «Акционный товар» и есть ступени скидки);
+    # false — все остальные
+    has_promotion = _parse_bool(query_params.get("has_promotion"))
+    if has_promotion is not None:
+        promo = Q(stock=True) & Exists(ProductPromotionTier.objects.filter(product=OuterRef("pk"), discount_percent__gt=0))
+        qs = qs.filter(promo) if has_promotion else qs.exclude(promo)
 
     preset = _normalize_preset(query_params.get("preset"))
     if preset:
