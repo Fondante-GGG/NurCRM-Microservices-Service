@@ -941,6 +941,8 @@ class SaleListSerializer(serializers.ModelSerializer):
     user_display = serializers.SerializerMethodField()
     consultant_display = serializers.SerializerMethodField(read_only=True)
     client_name = serializers.CharField(source="client.full_name", read_only=True)
+    # 03.11 front-market: телефон покупателя для кнопки WhatsApp в чеке
+    client_phone = serializers.CharField(source="client.phone", read_only=True, default=None)
     change = serializers.DecimalField(max_digits=12, decimal_places=2, read_only=True)
     first_item_name = serializers.SerializerMethodField(read_only=True)
     items_preview = serializers.SerializerMethodField(read_only=True)
@@ -1014,6 +1016,7 @@ class SaleListSerializer(serializers.ModelSerializer):
             "consultant_commission_amount",
             "client",
             "client_name",
+            "client_phone",
             "payment_method",
             "cash_received",
             "change",
@@ -1316,6 +1319,8 @@ class SaleDetailSerializer(serializers.ModelSerializer):
     consultant_display = serializers.SerializerMethodField(read_only=True)
     items = SaleItemReadSerializer(many=True, read_only=True)
     client_name = serializers.CharField(source="client.full_name", read_only=True)
+    # 03.11 front-market: телефон покупателя для кнопки WhatsApp в чеке
+    client_phone = serializers.CharField(source="client.phone", read_only=True, default=None)
     change = serializers.DecimalField(max_digits=12, decimal_places=2, read_only=True)
     payments = serializers.SerializerMethodField(read_only=True)
     deal_id = serializers.SerializerMethodField(read_only=True)
@@ -1364,6 +1369,7 @@ class SaleDetailSerializer(serializers.ModelSerializer):
             "consultant_commission_amount",
             "client",
             "client_name",
+            "client_phone",
             "items",
             "payment_method",
             "cash_received",
