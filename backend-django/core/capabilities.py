@@ -57,6 +57,7 @@ FEATURES = (
     "cashflow_salary_period",
     "products_has_promotion",  # G4: products/list/?has_promotion=true|false
     "products_piece_sale",  # G5: products/list/?piece_sale=true|false
+    "products_barcodes_filter",  # G6: products/list/?barcodes=a,b,c (основной или доп. код), до 500
 )
 
 
