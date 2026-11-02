@@ -660,6 +660,11 @@ class CashFlowSerializer(CompanyBranchReadOnlyMixin):
 
     cashier = serializers.ReadOnlyField(source="cashier.id")
     cashier_display = serializers.SerializerMethodField()
+    # 03.11 front-market: кому выплата (зарплата); только сотрудник своей компании
+    employee = serializers.PrimaryKeyRelatedField(
+        queryset=User.objects.none(), required=False, allow_null=True,
+    )
+    employee_name = serializers.SerializerMethodField()
     # Алиас для аналитики Производства (фронт читает user_name|created_by_name|...).
     user_name = serializers.SerializerMethodField()
 
@@ -695,6 +700,8 @@ class CashFlowSerializer(CompanyBranchReadOnlyMixin):
             "category_title",
             "cashier",
             "cashier_display",
+            "employee",
+            "employee_name",
             "user_name",
             "request_kind",
             "target_flow",
@@ -715,6 +722,7 @@ class CashFlowSerializer(CompanyBranchReadOnlyMixin):
             "branch",
             "cashier",
             "cashier_display",
+            "employee_name",
             "user_name",
             "category_title",
             "request_kind",
@@ -754,6 +762,8 @@ class CashFlowSerializer(CompanyBranchReadOnlyMixin):
             self.fields["shift"].queryset = CashShift.objects.none()
             return
 
+        self.fields["employee"].queryset = User.objects.filter(company=company)
+
         target_branch = self._auto_branch()
 
         cb_qs = Cashbox.objects.filter(company=company)
@@ -778,6 +788,16 @@ class CashFlowSerializer(CompanyBranchReadOnlyMixin):
 
     def get_cashier_display(self, obj):
         u = getattr(obj, "cashier", None)
+        if not u:
+            return None
+        return (
+            getattr(u, "get_full_name", lambda: "")()
+            or getattr(u, "email", None)
+            or getattr(u, "username", None)
+        )
+
+    def get_employee_name(self, obj):
+        u = getattr(obj, "employee", None) if getattr(obj, "employee_id", None) else None
         if not u:
             return None
         return (

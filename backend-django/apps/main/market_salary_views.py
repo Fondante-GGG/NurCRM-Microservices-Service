@@ -270,6 +270,10 @@ class MarketSalaryPayoutListCreateAPIView(APIView):
                     affects_shift_drawer=bool(shift is not None and method in ("", "cash")),
                     payment_method=method or None,
                 )
+                if cf is not None and cf.employee_id != employee.id:
+                    # 03.11: кому выплачено — отдельным полем, не только текстом в названии
+                    CashFlow.objects.filter(pk=cf.pk).update(employee=employee)
+                    cf.employee = employee
                 payout.cashflow = cf
                 if cf is not None and payout.cashbox_id is None:
                     payout.cashbox = cf.cashbox
@@ -329,6 +333,8 @@ class MarketSalaryPayoutDetailAPIView(APIView):
                     affects_shift_drawer=bool(shift is not None and payout.cashflow.affects_shift_drawer),
                     payment_method=payout.cashflow.payment_method,
                 )
+                if rev is not None and payout.employee_id:
+                    CashFlow.objects.filter(pk=rev.pk).update(employee_id=payout.employee_id)
                 payout.reversal_cashflow = rev
             payout.reversed_at = timezone.now()
             payout.save(update_fields=["reversed_at", "reversal_cashflow"])

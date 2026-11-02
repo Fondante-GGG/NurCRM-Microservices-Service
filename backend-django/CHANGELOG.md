@@ -2,6 +2,11 @@
 
 Новые записи сверху. Единое ТЗ бэкенду 26.10.2026, разделы 8–11 (Б-52…Б-87).
 
+## 03.11.2026 — выплаты зарплаты: id сотрудника в расходе
+- `CashFlow.employee` (необязательная ссылка на сотрудника своей компании): `POST/PATCH construction/cashflows/` принимает `employee`, в ответе `employee` и `employee_name`. Выплаты `main/market-salary/payouts/` (и их отмена) ставят его сами.
+- `?employee=<id>`: строки с `employee` — по нему, старые строки без него — по кассиру (как в ТЗ Н-19); `?employee_strict=1` — только по `employee`.
+- Миграция construction 0039 (Postgres: колонка, FK NOT VALID, индекс CONCURRENTLY; atomic=False).
+- `manage.py backfill_cashflow_employee [--apply] [--company] [--batch 500]`: по id выплаты MarketSalaryPayout и по названию «Зарплата: Имя» (тёзки пропускаются). Без `--apply` только отчёт.
 ## 01.11.2026 — редактор накладных: скидка, цена продажи, history
 - `PATCH suppliers/receipts/{id}/`: шапка `discount` (сумма / `"10%"`) и `discount_percent`; пересчитывает закупку (и `landed_price`) строк пропорционально, как при проведении; идёт в итог, долг поставщику, кассу, `deltas.header`, снимок версии; откат версии возвращает скидку. 422 `discount_exceeds_total`.
 - Строка `lines[].sale_price` (+ `update_product_sale_price`, по умолчанию true): меняет цену продажи строки и товара (наценка от закупки), `deltas.sale_price[]`, предупреждение `sale_price_not_latest`; откат цену товара не трогает.

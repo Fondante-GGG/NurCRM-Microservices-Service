@@ -1,4 +1,5 @@
 from apps.integrations.idempotency import idempotent
+import uuid
 from decimal import Decimal, InvalidOperation
 
 from django.apps import apps
@@ -702,6 +703,7 @@ class CashFlowListCreateView(CompanyBranchScopedMixin, generics.ListCreateAPIVie
         "cashbox", "cashbox__branch",
         "shift", "shift__cashier",
         "cashier",
+        "employee",
         "category",
     )
     serializer_class = CashFlowSerializer
@@ -755,10 +757,23 @@ class CashFlowListCreateView(CompanyBranchScopedMixin, generics.ListCreateAPIVie
         if source_id:
             qs = qs.filter(source_id=source_id)
 
-        # ✅ по кассиру: ?cashier=<uuid> (ТЗ Н-19: ?employee= — тот же сотрудник; отдельного поля нет)
-        cashier_id = qp.get("cashier") or qp.get("employee")
+        # ✅ по кассиру: ?cashier=<uuid>
+        cashier_id = qp.get("cashier")
         if cashier_id:
             qs = qs.filter(cashier_id=cashier_id)
+
+        # ✅ по сотруднику: ?employee=<uuid> (03.11). Строки с полем employee — по нему (кому выплачено);
+        # старые строки без employee — как раньше по кассиру (ТЗ Н-19). ?employee_strict=1 — только по полю employee.
+        employee_id = (qp.get("employee") or "").strip()
+        if employee_id:
+            try:
+                employee_id = str(uuid.UUID(employee_id))
+            except ValueError:
+                raise ValidationError({"employee": ["Некорректный id сотрудника."]})
+            if (qp.get("employee_strict") or "").strip().lower() in ("1", "true", "yes"):
+                qs = qs.filter(employee_id=employee_id)
+            else:
+                qs = qs.filter(Q(employee_id=employee_id) | Q(employee__isnull=True, cashier_id=employee_id))
 
         # ✅ по категории: ?category=<uuid>
         category_id = qp.get("category")
@@ -868,7 +883,7 @@ class CashFlowDetailView(CompanyBranchScopedMixin, generics.RetrieveUpdateDestro
         "company", "branch",
         "cashbox", "cashbox__branch",
         "shift", "shift__cashier",
-        "cashier",
+        "cashier", "employee",
         "category",
     )
     serializer_class = CashFlowSerializer

@@ -1189,6 +1189,15 @@ class CashFlow(models.Model):
         related_name="cash_flows",
         verbose_name="Кассир",
     )
+    # 03.11 front-market: кому выплачено (зарплата). Раньше выплаты искали по тексту «Зарплата: Имя».
+    employee = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="paid_cash_flows",
+        verbose_name="Сотрудник (кому выплата)",
+    )
     category = models.ForeignKey(
         "CashFlowCategory",
         on_delete=models.SET_NULL,
@@ -1222,6 +1231,7 @@ class CashFlow(models.Model):
             models.Index(fields=["company", "type", "created_at"], name="ix_flow_company_type_created"),
             models.Index(fields=["shift", "created_at"]),
             models.Index(fields=["cashier", "created_at"]),
+            models.Index(fields=["employee", "created_at"], name="ix_flow_employee_created"),
             models.Index(fields=["company", "source_kind", "source_id"], name="ix_flow_comp_src_kind_id"),
             models.Index(fields=["target_flow", "status"], name="ix_flow_target_status"),
             models.Index(fields=["request_kind"], name="ix_flow_request_kind"),
