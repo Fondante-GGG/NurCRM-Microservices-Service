@@ -101,6 +101,8 @@ class EmployeesListAccess(permissions.BasePermission):
     консалтинг-«продавец» с регионом (видит только себя), либо флаг can_view_employees (building — can_view_building_employess)."""
 
     FLAGS = ("can_view_employees", "can_view_building_employess")
+    # S2 (аудит 03.11): «Зарплата» — список сотрудников нужен, чтобы начислять и выплачивать
+    ALSO = ("can_view_salary", "can_view_building_salary")
 
     def has_permission(self, request, view):
         user = request.user
@@ -111,7 +113,7 @@ class EmployeesListAccess(permissions.BasePermission):
         if _legacy_client(request):
             return True  # до 29.10 список отдавался любому сотруднику — старые кассы и сайт так и работают
         # role=salesperson — это и кассир магазина; консалтинг-продавца отличает привязка к региону
-        if has_any_flag(user, self.FLAGS):
+        if has_any_flag(user, self.FLAGS + self.ALSO):
             return True
         if getattr(user, "role", None) == "salesperson" and user.get_consulting_region_codes():
             return True

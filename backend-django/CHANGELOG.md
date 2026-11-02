@@ -2,6 +2,10 @@
 
 Новые записи сверху. Единое ТЗ бэкенду 26.10.2026, разделы 8–11 (Б-52…Б-87).
 
+## 03.11.2026 — S2: список сотрудников для «Зарплаты»
+- `GET users/employees/` (новые клиенты и строгие компании): пускает и с `can_view_salary` / `can_view_building_salary` — без списка нельзя начислить и выплатить. Менять сотрудников это право не даёт.
+- `capabilities.features`: `employees_list_salary`.
+
 ## 03.11.2026 — G2: массовый приход в филиал
 - `POST main/products/mass-incoming/`: `branch` в теле (или `?branch=`) — новые карточки создаются в этом филиале; `"main"` или без поля — каталог компании, как раньше. Чужой филиал — 404 `branch_not_found`, плохой UUID — 400 `branch_invalid`, филиал не из своих у сотрудника — 403 `branch_forbidden`.
 - `capabilities.features`: `mass_incoming_branch`.
