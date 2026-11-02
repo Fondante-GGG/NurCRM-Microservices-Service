@@ -1703,6 +1703,13 @@ class UserUiPreferencesSerializer(serializers.ModelSerializer):
         required=False,
         error_messages={"invalid_choice": "Допустимы soft или classic"}
     )
+    # S8 (аудит 03.11): dark_style — то же, что theme_dark_palette (так его называет front-market)
+    dark_style = serializers.ChoiceField(
+        choices=["soft", "classic"],
+        source="theme_dark_palette",
+        required=False,
+        error_messages={"invalid_choice": "Допустимы soft или classic"}
+    )
 
     class Meta:
         model = UserUiPreferences
@@ -1711,5 +1718,6 @@ class UserUiPreferencesSerializer(serializers.ModelSerializer):
             "cashier_desktop_download",
             "theme_mode",
             "theme_dark_palette",
+            "dark_style",
         )
 

@@ -2,6 +2,10 @@
 
 Новые записи сверху. Единое ТЗ бэкенду 26.10.2026, разделы 8–11 (Б-52…Б-87).
 
+## 03.11.2026 — S8: стиль тёмной темы на сервере
+- `users/ui-preferences/`: поле `dark_style` (`soft` | `classic`) — то же, что `theme_dark_palette` (оба имени читаются и пишутся). Без миграции.
+- `capabilities.features`: `ui_dark_style`.
+
 ## 03.11.2026 — S5: прокат по филиалу
 - `GET rentals/?branch=<uuid>` — прокаты филиала (филиал смены, в которой выдан); `?branch=main` — без филиала; плохой UUID — 400.
 - `capabilities.features`: `rentals_branch_filter`.

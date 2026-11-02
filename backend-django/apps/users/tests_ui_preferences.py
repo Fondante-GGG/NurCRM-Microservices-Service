@@ -54,6 +54,7 @@ class UserUiPreferencesTests(TestCase):
                 "cashier_desktop_download": True,
                 "theme_mode": "light",
                 "theme_dark_palette": "soft",
+                "dark_style": "soft",  # S8 03.11
             },
         )
 
