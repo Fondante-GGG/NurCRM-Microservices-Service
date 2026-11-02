@@ -51,6 +51,8 @@ FEATURES = (
     "mass_incoming_branch",  # G2: mass-incoming {branch} или ?branch= — филиал новых карточек
     "employees_list_salary",  # S2: GET users/employees/ пускает и с can_view_salary
     "cashflow_check_note_only",  # S7: cashflows/{id}/check/ {note} без checked — отметку не трогает
+    # S4: construction/shifts/?date_from=&date_to= (по opened_at); pos/cart-item-deletions/ даты, user, search
+    "shifts_date_filter", "cart_deletions_filters",
 )
 
 

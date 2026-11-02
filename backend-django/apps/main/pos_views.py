@@ -5610,7 +5610,21 @@ class CartItemDeletionLogListAPIView(MarketCashierOnlyMixin, CompanyBranchRestri
 
     def get_queryset(self):
         qs = CartItemDeletionLog.objects.select_related("deleted_by", "product", "cart").all()
-        return self._filter_qs_company_branch(qs)
+        qs = self._filter_qs_company_branch(qs)
+        # S4 (аудит 03.11): ?date_from=&date_to= (дата или дата-время, по created_at), ?user= (кто удалил),
+        # ?search= (название / штрихкод товара). Без параметров — как раньше.
+        qs = _apply_sale_date_filters(qs, self.request)
+        qp = self.request.query_params
+        user_param = (qp.get("user") or qp.get("deleted_by") or "").strip()
+        if user_param:
+            try:
+                qs = qs.filter(deleted_by_id=uuid.UUID(user_param))
+            except ValueError:
+                raise ValidationError({"user": "Некорректный UUID."})
+        search = (qp.get("search") or "").strip()
+        if search:
+            qs = qs.filter(Q(product_name__icontains=search) | Q(product__barcode=search))
+        return qs.order_by("-created_at", "-id")
 
 
 class SaleAddCustomItemAPIView(MarketCashierOnlyMixin, APIView):

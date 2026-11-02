@@ -1305,6 +1305,15 @@ class CashShiftListView(CompanyBranchScopedMixin, generics.ListAPIView):
             qs = qs.filter(cashbox_id=cashbox_id)
         if status_q in ("open", "closed"):
             qs = qs.filter(status=status_q)
+        # S4 (аудит 03.11): ?date_from=&date_to= — по дате открытия смены (YYYY-MM-DD, включительно)
+        from django.utils.dateparse import parse_date as _pd
+        for param, lookup in (("date_from", "opened_at__date__gte"), ("date_to", "opened_at__date__lte")):
+            raw = (self.request.query_params.get(param) or "").strip()
+            if raw:
+                d = _pd(raw[:10])
+                if d is None:
+                    raise ValidationError({param: "Формат YYYY-MM-DD."})
+                qs = qs.filter(**{lookup: d})
 
         # Новые смены сверху
         return qs.order_by("-opened_at", "-id")

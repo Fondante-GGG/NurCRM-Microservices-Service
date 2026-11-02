@@ -2,6 +2,11 @@
 
 Новые записи сверху. Единое ТЗ бэкенду 26.10.2026, разделы 8–11 (Б-52…Б-87).
 
+## 03.11.2026 — S4: фильтры смен и журнала удалений из корзины
+- `GET construction/shifts/?date_from=&date_to=` — по дате открытия смены (YYYY-MM-DD, включительно); плохая дата — 400.
+- `GET main/pos/cart-item-deletions/`: `date_from` / `date_to` (дата или дата-время, по времени удаления), `user` (кто удалил), `search` (название или штрихкод товара); порядок — новые сверху.
+- `capabilities.features`: `shifts_date_filter`, `cart_deletions_filters`.
+
 ## 03.11.2026 — S7: заметка бухгалтера без снятия отметки
 - `POST construction/cashflows/{id}/check/`: только `{note}` (без `checked`) — меняется заметка, «проверено», время и кто проверил остаются. Повторное `checked: true` не перезаписывает время и автора. Пустое тело — «проверено», как раньше.
 - `capabilities.features`: `cashflow_check_note_only`.
