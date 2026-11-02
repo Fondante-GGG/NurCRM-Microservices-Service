@@ -61,6 +61,7 @@ FEATURES = (
     "supplier_products_page_size",  # G7: suppliers/{id}/products/?page_size= (до 500)
     "rentals_branch_filter",  # S5: rentals/?branch=<uuid>|main
     "ui_dark_style",  # S8: users/ui-preferences/ dark_style (soft|classic) = theme_dark_palette
+    "bundle_component_id",  # G8: packages_input[].product_id у комплекта; в ответе packages[].product_id/product_name
 )
 
 

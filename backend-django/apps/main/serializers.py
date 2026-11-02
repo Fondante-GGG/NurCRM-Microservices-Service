@@ -874,6 +874,12 @@ class ProductPackageSerializer(serializers.ModelSerializer):
         min_value=Decimal("0"),
     )
 
+    # G8 (аудит 03.11): товар состава комплекта (kind=bundle); без поля — по названию, как раньше
+    product_id = serializers.PrimaryKeyRelatedField(
+        source="component", queryset=Product.objects.all(), required=False, allow_null=True,
+    )
+    product_name = serializers.CharField(source="component.name", read_only=True, default=None)
+
     class Meta:
         model = ProductPackage
         fields = [
@@ -882,11 +888,25 @@ class ProductPackageSerializer(serializers.ModelSerializer):
             "quantity_in_package",
             "unit",
             "piece_unit_price",
+            "product_id",
+            "product_name",
         ]
         read_only_fields = ["id"]
 
 
 MAX_PRODUCT_PROMOTION_TIERS = 30
+
+
+def _package_component(pkg, product):
+    """G8: товар состава из строки packages_input (product_id) — только из компании товара и не он сам."""
+    comp = pkg.get("component") if hasattr(pkg, "get") else None
+    if comp is None:
+        return None
+    if comp.company_id != product.company_id:
+        raise serializers.ValidationError({"packages_input": "Товар состава не найден в вашей компании."})
+    if comp.pk == product.pk:
+        raise serializers.ValidationError({"packages_input": "Комплект не может состоять из самого себя."})
+    return comp
 
 
 def _package_row_piece_unit_price(pkg) -> object:
@@ -1874,12 +1894,14 @@ class ProductSerializer(CompanyBranchReadOnlyMixin, serializers.ModelSerializer)
                 raise serializers.ValidationError({
                     "packages_input": "Для каждой упаковки укажите piece_unit_price (цена за штуку при поштучной продаже).",
                 })
+            comp = _package_component(pkg, product)
             ProductPackage.objects.create(
                 product=product,
-                name=(pkg.get("name") or "").strip(),
+                name=(pkg.get("name") or "").strip() or (comp.name if comp else ""),
                 quantity_in_package=pkg.get("quantity_in_package"),
                 unit=(pkg.get("unit") or "").strip(),
                 piece_unit_price=pup,
+                component=comp,
             )
 
         sync_product_promotion_tiers(
@@ -2096,12 +2118,14 @@ class ProductSerializer(CompanyBranchReadOnlyMixin, serializers.ModelSerializer)
                     raise serializers.ValidationError({
                         "packages_input": "Для каждой упаковки укажите piece_unit_price (цена за штуку при поштучной продаже).",
                     })
+                comp = _package_component(pkg, instance)
                 ProductPackage.objects.create(
                     product=instance,
-                    name=(pkg.get("name") or "").strip(),
+                    name=(pkg.get("name") or "").strip() or (comp.name if comp else ""),
                     quantity_in_package=pkg.get("quantity_in_package"),
                     unit=(pkg.get("unit") or "").strip(),
                     piece_unit_price=pup,
+                    component=comp,
                 )
 
         if promotion_in:

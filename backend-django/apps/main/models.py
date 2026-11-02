@@ -1602,6 +1602,19 @@ class ProductPackage(models.Model):
         ),
     )
 
+    # G8 (аудит 03.11): у комплекта (kind=bundle) строка packages — это товар состава. Раньше хранилось
+    # только название (name); теперь можно и ссылку. NULL — старые строки «по названию», работают как раньше.
+    # db_constraint=False: без внешнего ключа в базе (миграция не трогает горячую main_product).
+    component = models.ForeignKey(
+        "main.Product",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        db_constraint=False,
+        related_name="+",
+        verbose_name="Товар состава (комплект)",
+    )
+
     created_at = models.DateTimeField("Создано", auto_now_add=True)
 
     class Meta:

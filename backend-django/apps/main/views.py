@@ -1354,6 +1354,7 @@ class ProductListView(CompanyBranchRestrictedMixin, generics.ListAPIView):
             .prefetch_related(
                 "item_make",
                 "packages",
+                "packages__component",  # G8: название товара состава комплекта без N+1
                 "recipe_items__item_make",
                 # Раньше сериализовались на каждый товар без prefetch → N+1
                 # (по ~100 доп. запросов на страницу): промо-ступени и поставщики.

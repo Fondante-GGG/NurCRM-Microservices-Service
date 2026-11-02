@@ -2,6 +2,11 @@
 
 Новые записи сверху. Единое ТЗ бэкенду 26.10.2026, разделы 8–11 (Б-52…Б-87).
 
+## 03.11.2026 — G8: состав комплекта по id товара
+- `packages_input[]` (создание и PATCH товара) принимает `product_id` — товар состава комплекта (только своей компании, не сам комплект); в ответе `packages[].product_id` и `product_name`. Без `product_id` — по названию, как раньше; старые комплекты не меняются (`product_id: null`).
+- `ProductPackage.component` (ссылка без внешнего ключа в базе: удалённый товар не ломает строку). Миграция main 0173 (маленькая таблица, колонка NULL + индекс).
+- `capabilities.features`: `bundle_component_id`.
+
 ## 03.11.2026 — S8: стиль тёмной темы на сервере
 - `users/ui-preferences/`: поле `dark_style` (`soft` | `classic`) — то же, что `theme_dark_palette` (оба имени читаются и пишутся). Без миграции.
 - `capabilities.features`: `ui_dark_style`.
