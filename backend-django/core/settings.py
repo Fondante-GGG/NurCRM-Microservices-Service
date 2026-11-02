@@ -601,7 +601,13 @@ CORS_ALLOW_HEADERS = list(default_headers) + [
     'sec-ch-ua',
     'sec-ch-ua-mobile',
     'sec-ch-ua-platform',
+    # 03.11 front-market: окно PIN (X-Pin-Token) и правка накладных с If-Match / ETag
+    'x-pin-token',
+    'if-match',
+    'if-none-match',
 ]
+# 03.11 front-market: фронт на другом домене (Vercel) читает эти заголовки ответа
+CORS_EXPOSE_HEADERS = ['Retry-After', 'ETag', 'Content-Disposition']
 
 CORS_ALLOW_METHODS = (
     "DELETE",

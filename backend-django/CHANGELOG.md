@@ -2,6 +2,10 @@
 
 Новые записи сверху. Единое ТЗ бэкенду 26.10.2026, разделы 8–11 (Б-52…Б-87).
 
+## 03.11.2026 — CORS для нового фронта маркета
+- Проверено: `CORS_ALLOW_ALL_ORIGINS = True` в коде — front-market.vercel.app, превью `*.vercel.app` и market.nurcrm.kg уже проходят; `.env` менять не нужно (DJANGO_ALLOWED_HOSTS=*, API на JWT, CSRF не участвует).
+- `CORS_ALLOW_HEADERS` += `x-pin-token`, `if-match`, `if-none-match`; `CORS_EXPOSE_HEADERS` = `Retry-After`, `ETag`, `Content-Disposition` (фронт с другого домена видит паузу при 429).
+
 ## 03.11.2026 — серверные фильтры чеков и приходов
 - `GET main/pos/sales/?payment_method=noncash` — «Безнал»: всё, кроме `cash` и `debt` (transfer, mbank, optima, obank, bakai, mixed, offset). Можно списком: `payment_method=cash,debt` (transfer в списке — вместе с банками). Одно значение — как раньше.
 - `GET main/suppliers/receipts/`: `created_by=<uuid>` («кто»), `amount_min` / `amount_max` (сумма прихода), `product_search` (товар: название/штрихкод/код; строки прихода не урезаются). `count` и `meta.total_amount` — с учётом фильтров.
