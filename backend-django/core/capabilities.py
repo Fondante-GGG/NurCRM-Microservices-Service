@@ -56,6 +56,7 @@ FEATURES = (
     # S6: CashFlow.salary_period ("YYYY-MM" или {from,to}), фильтр ?salary_period= / ?salary_period_from=&_to=
     "cashflow_salary_period",
     "products_has_promotion",  # G4: products/list/?has_promotion=true|false
+    "products_piece_sale",  # G5: products/list/?piece_sale=true|false
 )
 
 

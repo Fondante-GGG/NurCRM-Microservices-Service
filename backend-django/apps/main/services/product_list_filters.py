@@ -9,7 +9,7 @@ from decimal import Decimal, InvalidOperation
 from django.db.models import Exists, F, OuterRef, Q
 from django.utils import timezone
 
-from apps.main.models import Product, ProductPromotionTier, Sale, SaleItem
+from apps.main.models import Product, ProductPackage, ProductPromotionTier, Sale, SaleItem
 
 VALID_KINDS = {c[0] for c in Product.Kind.choices}
 VALID_PRESETS = {
@@ -237,6 +237,13 @@ def apply_product_list_filters(qs, query_params):
     if has_promotion is not None:
         promo = Q(stock=True) & Exists(ProductPromotionTier.objects.filter(product=OuterRef("pk"), discount_percent__gt=0))
         qs = qs.filter(promo) if has_promotion else qs.exclude(promo)
+
+    # G5 (аудит 03.11): ?piece_sale=true — продаются поштучно из упаковки (есть упаковки); у комплекта
+    # (kind=bundle) packages — это состав, поэтому комплекты сюда не входят. false — без упаковок.
+    piece_sale = _parse_bool(query_params.get("piece_sale"))
+    if piece_sale is not None:
+        packs = Exists(ProductPackage.objects.filter(product=OuterRef("pk"))) & ~Q(kind=Product.Kind.BUNDLE)
+        qs = qs.filter(packs) if piece_sale else qs.exclude(packs)
 
     preset = _normalize_preset(query_params.get("preset"))
     if preset:
