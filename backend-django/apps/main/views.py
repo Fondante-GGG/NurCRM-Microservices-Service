@@ -5204,6 +5204,9 @@ class DebtPayAPIView(APIView, CompanyBranchRestrictedMixin):
     """
     permission_classes = [permissions.IsAuthenticated]
 
+    # S9 (аудит 03.11): заголовок Idempotency-Key или поле idempotency_key — повтор (обрыв сети, двойной
+    # клик) отдаёт прежний ответ и не создаёт второй платёж и приход в кассу. Без ключа — как раньше.
+    @idempotent(body_key=True)
     @transaction.atomic
     def post(self, request, pk):
         # выбираем долг в рамках company/branch по общей логике

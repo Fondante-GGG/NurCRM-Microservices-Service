@@ -46,6 +46,7 @@ FEATURES = (
     "employee_rights_guard",
     # S3: pos/sales и pos/returns — кассиру только свои (сервер); pos/returns/?search=
     "sales_own_only", "returns_search",
+    "debt_pay_idempotency",  # S9: POST main/debts/{id}/pay/ — Idempotency-Key или idempotency_key
 )
 
 
