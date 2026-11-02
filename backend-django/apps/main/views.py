@@ -6761,6 +6761,28 @@ class SupplierReceiptQuerysetMixin:
                 | Exists(items_match)
             )
 
+        # 03.11 front-market: «кто», «сумма от/до», «товар» — раньше фронт считал их по загруженной странице
+        created_by = (qp.get("created_by") or "").strip()
+        if created_by:
+            try:
+                qs = qs.filter(created_by_id=UUID(created_by))
+            except ValueError:
+                return qs.none()
+        for key, lookup in (("amount_min", "total_amount__gte"), ("amount_max", "total_amount__lte")):
+            raw = (qp.get(key) or "").strip().replace(",", ".")
+            if raw:
+                try:
+                    qs = qs.filter(**{lookup: Decimal(raw)})
+                except (InvalidOperation, ValueError):
+                    return qs.none()
+        product_search = (qp.get("product_search") or "").strip()
+        if product_search:
+            qs = qs.filter(Exists(SupplierReceiptItem.objects.filter(receipt_id=OuterRef("pk")).filter(
+                Q(product__name__icontains=product_search)
+                | Q(product__barcode__icontains=product_search)
+                | Q(product__code__icontains=product_search)
+            )))
+
         return qs
 
 

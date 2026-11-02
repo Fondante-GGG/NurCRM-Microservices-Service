@@ -38,6 +38,9 @@ FEATURES = (
     "showcase_telegram", "showcase_cart_link", "showcase_order_source_detail",
     # ТЗ 01.11: чат на витрине (web_widget, согласие, удаление чата) и ИИ-помощник витрины с ключом магазина
     "showcase_chat", "showcase_assistant",
+    # 03.11 front-market: CashFlow.employee + ?employee=; миниатюры image_thumb_url; pos/sales payment_method=noncash
+    # и списком через запятую; suppliers/receipts ?created_by=&amount_min=&amount_max=&product_search=
+    "cashflow_employee", "product_thumbs", "sales_noncash_filter", "receipts_filters",
 )
 
 

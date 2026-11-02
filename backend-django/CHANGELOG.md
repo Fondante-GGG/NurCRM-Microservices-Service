@@ -2,6 +2,11 @@
 
 Новые записи сверху. Единое ТЗ бэкенду 26.10.2026, разделы 8–11 (Б-52…Б-87).
 
+## 03.11.2026 — серверные фильтры чеков и приходов
+- `GET main/pos/sales/?payment_method=noncash` — «Безнал»: всё, кроме `cash` и `debt` (transfer, mbank, optima, obank, bakai, mixed, offset). Можно списком: `payment_method=cash,debt` (transfer в списке — вместе с банками). Одно значение — как раньше.
+- `GET main/suppliers/receipts/`: `created_by=<uuid>` («кто»), `amount_min` / `amount_max` (сумма прихода), `product_search` (товар: название/штрихкод/код; строки прихода не урезаются). `count` и `meta.total_amount` — с учётом фильтров.
+- `capabilities.features`: `cashflow_employee`, `product_thumbs`, `sales_noncash_filter`, `receipts_filters`.
+
 ## 03.11.2026 — миниатюры фото товаров
 - `ProductImage.thumb`: при загрузке фото делается миниатюра WebP 320px по большей стороне (`products/<id>/thumbs/`); удаляется вместе с фото. Не получилось — фото всё равно сохраняется.
 - В API: `image_thumb_url` у каждой картинки (`images[]` в `main/products/list/`, карточка, POS) и у `ProductListSerializer`. `null` — миниатюры ещё нет, брать `image_url`.

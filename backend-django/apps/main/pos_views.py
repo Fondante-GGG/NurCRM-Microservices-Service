@@ -755,6 +755,10 @@ SALE_TRANSFER_METHODS = (
 )
 
 
+# 03.11 front-market: payment_method=noncash — всё, кроме этих способов.
+SALE_NONCASH_EXCLUDED = (Sale.PaymentMethod.CASH, Sale.PaymentMethod.DEBT)
+
+
 def _aware(dt_or_date, end=False):
     tz = get_current_timezone()
     if isinstance(dt_or_date, datetime):
@@ -4957,6 +4961,15 @@ class SaleListAPIView(MarketCashierOnlyMixin, CompanyBranchRestrictedMixin, gene
             if payment_method == Sale.PaymentMethod.TRANSFER:
                 # ТЗ 12.11: безнал разных банков тоже считается переводом.
                 qs = qs.filter(payment_method__in=SALE_TRANSFER_METHODS)
+            elif payment_method == "noncash":
+                # 03.11 front-market «Безнал»: всё, кроме наличных и долга (перевод, банки, смешанная, зачёт)
+                qs = qs.exclude(payment_method__in=SALE_NONCASH_EXCLUDED)
+            elif "," in payment_method:
+                # 03.11: несколько способов через запятую; transfer — вместе с банками
+                vals = {v.strip() for v in payment_method.split(",") if v.strip()}
+                if Sale.PaymentMethod.TRANSFER in vals:
+                    vals.update(SALE_TRANSFER_METHODS)
+                qs = qs.filter(payment_method__in=vals)
             else:
                 qs = qs.filter(payment_method=payment_method)
 
