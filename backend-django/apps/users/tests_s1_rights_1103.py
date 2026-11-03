@@ -118,12 +118,27 @@ class SelfRightsTests(N16Base):
         self.assertFalse(self.fresh(self.cashier).can_cash_negative)
 
     def test_full_card_does_not_turn_role_default_into_no(self):
-        """У админа по умолчанию (NULL) можно отменять проведение; карточка с false от фронта
-        (Boolean(null)) от не-владельца не должна молча снять право — и не должна ошибиться."""
+        """front-market шлёт Boolean(null)=false по всем опасным правам при каждом сохранении:
+        у админа (NULL = по умолчанию «можно» отменять проведение) это не должно записать явное «нет»."""
         other_admin = User.objects.create_user(email=f"a2{uuid.uuid4().hex[:6]}@t.kg", password="x",
                                                company=self.company, role="admin")
-        r = self.api_owner.patch(self.emp(other_admin), {"can_unpost_documents": True, "comment": "x"}, format="json")
+        card = {k: False for k in ("can_post_negative_stock", "can_unpost_documents", "can_change_document_date",
+                                   "can_post_closed_period", "can_cash_negative")}
+        r = self.api_owner.patch(self.emp(other_admin), {**card, "comment": "x"}, format="json")
         self.assertEqual(r.status_code, 200, r.content)
-        self.assertIsNone(self.fresh(other_admin).can_unpost_documents)  # совпало с действующим — не пишем
-        r = self.api_rop.patch(self.emp(self.cashier), {"can_unpost_documents": False, "comment": "y"}, format="json")
-        self.assertEqual(r.status_code, 200, r.content)  # у кассира и так «нет»
+        self.assertIsNone(self.fresh(other_admin).can_unpost_documents)
+        r = self.api_rop.patch(self.emp(self.cashier), {**card, "comment": "y"}, format="json")
+        self.assertEqual(r.status_code, 200, r.content)  # у кассира и так «нет» — РОП может сохранить карточку
+        # ранее выданное снимается явно
+        User.objects.filter(pk=self.cashier.pk).update(can_cash_negative=True)
+        self.assertForbidden(self.api_rop.patch(self.emp(self.cashier), {"can_cash_negative": False}, format="json"))
+        r = self.api_owner.patch(self.emp(self.cashier), {"can_cash_negative": False}, format="json")
+        self.assertEqual(r.status_code, 200, r.content)
+        self.assertFalse(self.fresh(self.cashier).can_cash_negative)
+
+    def test_list_shows_danger_rights(self):
+        User.objects.filter(pk=self.cashier.pk).update(can_unpost_documents=True)
+        rows = self.api_owner.get("/api/users/employees/").json()["results"]
+        row = [x for x in rows if x["id"] == str(self.cashier.id)][0]
+        self.assertIs(row["can_unpost_documents"], True)
+        self.assertIsNone(row["can_cash_negative"])

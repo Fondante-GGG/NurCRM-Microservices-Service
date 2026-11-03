@@ -73,7 +73,7 @@
 ## 03.11.2026 — S1: роль и права сотрудника (дыра в правах)
 - `PATCH users/profile/`: себе нельзя поменять `role` / `custom_role` (никому, кроме суперпользователя) и любые `can_*` (всем, кроме владельца компании — старый сайт дописывает владельцу права сферы). Ответ 403 `{code: permission_denied, required: can_edit_employees, field}`. Присланные без изменений значения (карточка целиком) проходят; NULL и false у `can_view_*` — одно и то же.
 - `PATCH users/employees/{id}/` и `POST users/employees/create/`: роль `admin` выдаёт только владелец/админ, роль `owner` — только владелец; карточку админа/владельца меняет только владелец/админ (РОП и руководитель региона — нет).
-- Опасные права склада (`can_post_negative_stock`, `can_unpost_documents`, `can_change_document_date`, `can_post_closed_period`, `can_cash_negative`) теперь принимаются в `PATCH employees/{id}/` (раньше молча отбрасывались) — только от владельца/админа; значение, совпадающее с действующим по роли, не записывается (NULL «по умолчанию» не превращается в false).
+- Опасные права склада (`can_post_negative_stock`, `can_unpost_documents`, `can_change_document_date`, `can_post_closed_period`, `can_cash_negative`) теперь принимаются в `PATCH employees/{id}/` (раньше молча отбрасывались) — только от владельца/админа. Изменение — это выдать (`true`, когда не было явного `true`) или снять ранее выданное (`false` при `true`); `false` при NULL («по умолчанию для роли») — не изменение и не записывается (front-market шлёт false по всем опасным правам при каждом сохранении). В `GET users/employees/` эти поля теперь видны (null — по умолчанию).
 - `capabilities.features`: `employee_rights_guard`.
 
 ## 03.11.2026 — сверка API с front-market

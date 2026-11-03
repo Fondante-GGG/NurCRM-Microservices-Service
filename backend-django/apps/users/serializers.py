@@ -365,11 +365,24 @@ def _rights_value(instance, key):
     return raw
 
 
+def _op_fields():
+    from apps.warehouse.op_permissions import OP_PERMISSION_FIELDS
+
+    return OP_PERMISSION_FIELDS
+
+
 def _real_changes(data, instance, keys):
     """Ключи из keys, которые в data действительно отличаются от текущих (с учётом NULL)."""
     out = []
     for k in keys:
         if k not in data:
+            continue
+        if k in _op_fields():
+            # опасные права: NULL («по умолчанию для роли») фронт показывает как «нет» и шлёт false —
+            # это не изменение; изменение — выдать (true при не-true) или снять ранее выданное (false при true)
+            raw, new = (getattr(instance, k, None) if instance is not None else None), bool(data[k])
+            if (new and raw is not True) or (not new and raw is True):
+                out.append(k)
             continue
         new, cur = data[k], _rights_value(instance, k)
         if k == "custom_role":
@@ -427,8 +440,8 @@ def _guard_employee_rights(data, target, current_user):
               else [k for k in OP_PERMISSION_FIELDS if data.get(k)])
     if danger and not elevated_editor:
         raise _rights_denied("Опасные права выдаёт только владелец или администратор.", danger[0])
-    # опасное право, совпадающее с действующим (NULL = по умолчанию для роли), не записываем —
-    # иначе карточка, присланная целиком, превратила бы «по умолчанию» в явное «нет»
+    # неизменённое опасное право не записываем: front-market шлёт false для NULL («по умолчанию для роли»),
+    # и сохранение карточки иначе сняло бы у админа права по умолчанию (отмена проведения, дата документа)
     for k in OP_PERMISSION_FIELDS:
         if k in data and k not in danger:
             data.pop(k)
@@ -1233,6 +1246,9 @@ class UserListSerializer(serializers.ModelSerializer):
             "can_manage_funnel_leads", "can_manage_funnel_stages", "can_create_funnel", "can_manage_lead_ad_spend",
             *READ_ONLY_FIELDS,
             "can_edit_purchase_documents",  # ТЗ редактор накладных 30.10
+            # S1 03.11: опасные права склада (null — по умолчанию для роли), чтобы фронт видел и не сбрасывал их
+            "can_post_negative_stock", "can_unpost_documents", "can_change_document_date",
+            "can_post_closed_period", "can_cash_negative",
             "branch_ids", "primary_branch_id",
             *EMPLOYEE_CARD_FIELDS,  # ТЗ 29.10 Б-101
         ]
