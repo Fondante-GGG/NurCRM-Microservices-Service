@@ -456,10 +456,11 @@ CELERY_BEAT_SCHEDULE = {
         'task': 'apps.consalting.tasks.scan_sla_breach',
         'schedule': crontab(minute='*/30'),
     },
-    'consalting-scan-unanswered-leads': {
-        'task': 'apps.consalting.tasks.scan_unanswered_leads',
-        'schedule': crontab(minute='*'),
-    },
+    # 03.11.2026: «Лид без ответа» выключено по просьбе
+#    'consalting-scan-unanswered-leads': {
+#        'task': 'apps.consalting.tasks.scan_unanswered_leads',
+#        'schedule': crontab(minute='*'),
+#    },
     'consalting-send-inbound-lead-reminders': {
         'task': 'apps.consalting.tasks.send_inbound_lead_reminders',
         'schedule': crontab(minute='*/5'),
