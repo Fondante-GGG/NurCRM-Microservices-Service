@@ -3,7 +3,7 @@
 #   - колонка без значения по умолчанию (мгновенно),
 #   - внешний ключ NOT VALID (без проверки всей таблицы под блокировкой; колонка пустая),
 #   - индекс CONCURRENTLY (не блокирует запись). Миграция atomic = False.
-# Запускать с DB_PORT=5432 PGOPTIONS="-c lock_timeout=5s" и повторами, как 29.10.
+# Запускать с DB_PORT=5432 PGOPTIONS="-c lock_timeout=1s" и повторами (проверено 03.11 на PG 18.6: при 5s запись ждёт до 5 с за долгим отчётом).
 import django.db.models.deletion
 from django.conf import settings
 from django.db import migrations, models
