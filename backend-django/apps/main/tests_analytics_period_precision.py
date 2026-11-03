@@ -77,10 +77,14 @@ class CashierAccessTests(KassaBase):
             self.assertEqual(self.cashier_api.get("/api/main/analytics/market/", {"tab": tab}).status_code, 403, tab)
 
     def test_cashier_sees_all_cashiers_sales_and_stock_list(self):
-        # чек владельца (другой кассир) виден кассиру в «Последних продажах»
-        sale_id = self.quick().data["id"]
+        # S3 (аудит 03.11): в общем списке кассир без «Аналитики»/«Кассы» видит только свои чеки;
+        # чек владельца (другой кассир) находится по номеру — для возврата
+        sale = self.quick().data
         r = self.cashier_api.get("/api/main/pos/sales/", {"page_size": 8})
         self.assertEqual(r.status_code, 200, r.data)
-        self.assertIn(str(sale_id), {x["id"] for x in r.data["results"]})
+        self.assertNotIn(str(sale["id"]), {x["id"] for x in r.data["results"]})
+        num = Sale.objects.get(pk=sale["id"]).doc_number
+        r = self.cashier_api.get("/api/main/pos/sales/", {"number": num})
+        self.assertIn(str(sale["id"]), {x["id"] for x in r.data["results"]})
         r = self.cashier_api.get("/api/main/products/list/", {"preset": "low_stock", "ordering": "quantity"})
         self.assertEqual(r.status_code, 200, r.data)

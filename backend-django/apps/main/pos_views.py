@@ -5003,9 +5003,10 @@ class SaleListAPIView(MarketCashierOnlyMixin, CompanyBranchRestrictedMixin, gene
             ).annotate(matched_item_name=Subquery(matched_items.values("name_snapshot")[:1])).distinct()
 
         # S3 (аудит 03.11): кассир видит только свои чеки — теперь и на сервере, не только на фронте.
-        # Точный поиск чека по номеру (возврат по чеку коллеги) и чеки клиента (оплата долга) — как раньше.
+        # Как раньше: точный поиск по номеру (возврат по чеку коллеги), чеки клиента (оплата долга)
+        # и чеки смены ?shift= («История чеков» кассы NurMarket).
         from apps.users.permissions_flags import sees_all_sales
-        if not sees_all_sales(self.request.user) and not number and not client_param:
+        if not sees_all_sales(self.request.user) and not number and not client_param and not shift_param:
             qs = qs.filter(user_id=self.request.user.pk)
 
         return qs

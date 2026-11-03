@@ -54,6 +54,10 @@ class OwnSalesTests(N16Base):
         self.assertEqual(self.ids(self.api_cashier, f"?client={self.client_obj.id}"), {str(self.s_col.id)})
         r = self.api_cashier.get(f"/api/main/pos/sales/{self.s_col.id}/")
         self.assertEqual(r.status_code, 200, r.content)
+        # чеки смены (касса NurMarket, «История чеков») — все чеки этой смены
+        shift = self.open_shift(self.colleague)
+        Sale.objects.filter(pk=self.s_col.pk).update(shift=shift)
+        self.assertEqual(self.ids(self.api_cashier, f"?shift={shift.id}"), {str(self.s_col.id)})
 
     def test_owner_admin_accountant_see_all(self):
         everything = {str(self.s_me.id), str(self.s_col.id), str(self.s_own.id)}
