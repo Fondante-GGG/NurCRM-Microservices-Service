@@ -1106,9 +1106,17 @@ def _filter_products_company_only(view, qs, include_archived=False):
     show_archived = include_archived or bool(qp) and (
         str(qp.get("include_archived") or "").strip().lower() in ("1", "true", "yes")
         or str(qp.get("status") or "").strip().lower() == Product.Status.ARCHIVED
+        or str(qp.get("is_archived") or "").strip().lower() in ("1", "true", "yes")
     )
     if not show_archived:
         qs = qs.exclude(status=Product.Status.ARCHIVED)
+    # ТЗ кассы 05.11 п.13: ?is_archived=true / ?status=archived — только архив (раньше отдавался весь каталог)
+    only_arch = bool(qp) and (
+        str(qp.get("is_archived") or "").strip().lower() in ("1", "true", "yes")
+        or str(qp.get("status") or "").strip().lower() == Product.Status.ARCHIVED
+    )
+    if only_arch and not include_archived:
+        qs = qs.filter(status=Product.Status.ARCHIVED)
 
     if branch_param:
         if str(branch_param).strip().lower() == "main":
