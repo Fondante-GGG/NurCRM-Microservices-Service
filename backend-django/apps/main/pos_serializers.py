@@ -843,7 +843,7 @@ def _linked_debt_deal(sale):
 def _sale_debt_amount(sale):
     """Сколько ещё должны по продаже: по остатку сделки или debt_remaining, если есть; погашенная — 0."""
     is_debt = sale.status == Sale.Status.DEBT or sale.payment_method == Sale.PaymentMethod.DEBT
-    if not is_debt or sale.status == Sale.Status.PAID:
+    if not is_debt or sale.status in (Sale.Status.PAID, Sale.Status.CANCELED):  # 05.11 п.3
         return money(Decimal("0.00"))
     if getattr(sale, "debt_remaining", None) is not None:
         return money(sale.debt_remaining)
@@ -1439,6 +1439,9 @@ class SaleDetailSerializer(serializers.ModelSerializer):
     def get_remaining_debt(self, obj):
         deal = obj.deals.first() if hasattr(obj, "deals") else None
         if deal:
+            # ТЗ кассы 05.11 п.3: сделка отменённого возвратом чека — долга нет
+            if deal.kind == ClientDeal.Kind.CANCELED or obj.status == Sale.Status.CANCELED:
+                return "0.00"
             return str(deal.remaining_debt)
         legacy = getattr(obj, "legacy_debts", None)
         if legacy and legacy.exists():

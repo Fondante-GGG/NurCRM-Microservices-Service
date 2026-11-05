@@ -3744,6 +3744,15 @@ def _parse_is_defect(data) -> bool:
     return False
 
 
+def _sync_sale_debt_remaining(sale, value):
+    """ТЗ кассы 05.11 п.3: поле debt_remaining самого чека — как остаток долга после возврата."""
+    value = money(value)
+    if sale.debt_remaining is not None and money(sale.debt_remaining) == value:
+        return
+    Sale.objects.filter(pk=sale.pk).update(debt_remaining=value)
+    sale.debt_remaining = value
+
+
 def adjust_sale_debt_on_return(
     sale: Sale,
     returned_money: Decimal,
@@ -3825,6 +3834,7 @@ def adjust_sale_debt_on_return(
         # Не deal.remaining_debt: при отмене сделки (kind=CANCELED) ClientDeal.save() стирает график
         # взносов вместе с оплатами, и модельный расчёт даёт неверный остаток.
         remaining_after = max(Decimal("0.00"), remaining_before - debt_reduce).quantize(Decimal("0.01"))
+        _sync_sale_debt_remaining(sale, Decimal("0.00") if is_full_return else remaining_after)
         if (is_full_return and deal.paid_total == 0) or deal.kind == ClientDeal.Kind.CANCELED:
             deal_status = "canceled"
         elif remaining_after <= 0:
@@ -3860,6 +3870,7 @@ def adjust_sale_debt_on_return(
             legacy_debt.save(update_fields=["amount", "updated_at"])
 
         remaining_after = legacy_debt.balance
+        _sync_sale_debt_remaining(sale, Decimal("0.00") if is_full_return else max(Decimal("0.00"), remaining_after))
         deal_status = "closed" if remaining_after <= 0 else "open"
 
         return {
@@ -3977,6 +3988,35 @@ def _create_refund_cash_kept_flow(*, sale, cashbox, user, shift, amount, method,
         name=f"Наличные остались в кассе: возврат по чеку №{sale.doc_number or sale.id} отдан безналом",
         source_business_operation_id="pos_sale_return",
     )
+
+
+def debt_sale_repaid_cash_in_drawer(sale):
+    """
+    ТЗ кассы 05.11 п.2: сколько наличных по чеку в долг лежит в ящиках смен (гашения долга
+    debt_repayment с affects_shift_drawer=True) и ещё не выдано возвратами из ящика.
+    """
+    from apps.construction.models import CashFlow
+    from apps.main.models import ClientDeal, DealPayment
+
+    z = Decimal("0.00")
+    deal_ids = list(ClientDeal.objects.filter(sale=sale).values_list("id", flat=True))
+    if not deal_ids:
+        return z
+    # гашение по клиенту (clients/{id}/pay-debt/) пишет source_id = id платежа,
+    # гашение по чеку (pos/sales/{id}/pay-debt/) — id сделки
+    pay_ids = [str(i) for i in DealPayment.objects.filter(deal_id__in=deal_ids).values_list("id", flat=True)]
+    pay_ids += [str(i) for i in deal_ids]
+    repaid = CashFlow.objects.filter(
+        company_id=sale.company_id, type=CashFlow.Type.INCOME,
+        source_kind=CashFlow.SourceKind.DEBT_REPAYMENT, source_id__in=pay_ids,
+        affects_shift_drawer=True,
+    ).aggregate(s=Sum("amount"))["s"] or z
+    out = CashFlow.objects.filter(
+        company_id=sale.company_id, type=CashFlow.Type.EXPENSE,
+        source_kind=CashFlow.SourceKind.POS_SALE_RETURN, source_id=str(sale.id),
+        affects_shift_drawer=True,
+    ).aggregate(s=Sum("amount"))["s"] or z
+    return max(z, money(repaid - out))
 
 
 def _refund_drawer_effect(original_method, refund_method, has_shift):
@@ -4179,6 +4219,10 @@ def _execute_sale_return(
     # ТЗ 31.10 п.3: снимок чека до изменения — ответ API показывает исходный чек.
     from apps.main.sale_original import sale_snapshot
     sale_before = sale_snapshot(sale)
+    # ТЗ кассы 05.11 п.2: до правки долга — при отмене сделки её оплаты удаляются
+    repaid_in_drawer = (
+        debt_sale_repaid_cash_in_drawer(sale) if sale.payment_method == Sale.PaymentMethod.DEBT else Decimal("0.00")
+    )
 
     returned_lines = []
     if not partial_items:
@@ -4394,6 +4438,7 @@ def _execute_sale_return(
                                 created_flows.append(adj)
         else:
             p_m = str(sale.payment_method or "cash").lower()
+            was_debt = p_m == "debt"
             if p_m == "debt":
                 p_m = "cash"
             # Способ, которым деньги фактически отдали, может отличаться от
@@ -4401,14 +4446,34 @@ def _execute_sale_return(
             affects_drawer, _needs_income = _refund_drawer_effect(
                 p_m, refund_method, actual_shift is not None
             )
-            cf = None if is_offset_refund else create_auto_cashflow(
+            # ТЗ кассы 05.11 п.2: чек в долг, гашения наличными уже в ящике (debt_repayment,
+            # affects_shift_drawer=True) — выдача этих денег при возврате уменьшает ящик смены возврата.
+            rm_ = str(refund_method or "").strip().lower()
+            rest_refund = cash_to_refund
+            if (was_debt and not is_offset_refund and actual_shift is not None
+                    and rm_ in ("", "original", "same", "cash")):
+                in_drawer = min(cash_to_refund, repaid_in_drawer)
+                if in_drawer > 0:
+                    cf_d = create_auto_cashflow(
+                        company=sale.company, branch=sale.branch, cashbox=cashbox, user=user,
+                        shift=actual_shift, type=CashFlow.Type.EXPENSE, amount=in_drawer,
+                        source_kind=CashFlow.SourceKind.POS_SALE_RETURN, source_id=str(sale.id),
+                        idempotency_key=f"{flow_key}:cash-drawer",
+                        affects_shift_drawer=True, payment_method="cash",
+                        name=f"Возврат по чеку №{sale.doc_number or sale.id}",
+                        source_business_operation_id="pos_sale_return",
+                    )
+                    if cf_d:
+                        created_flows.append(cf_d)
+                    rest_refund = money(cash_to_refund - in_drawer)
+            cf = None if (is_offset_refund or rest_refund <= 0) else create_auto_cashflow(
                 company=sale.company,
                 branch=sale.branch,
                 cashbox=cashbox,
                 user=user,
                 shift=actual_shift,
                 type=CashFlow.Type.EXPENSE,
-                amount=cash_to_refund,
+                amount=rest_refund,
                 source_kind=CashFlow.SourceKind.POS_SALE_RETURN,
                 source_id=str(sale.id),
                 idempotency_key=f"{flow_key}:{p_m}" if not idempotency_key else str(idempotency_key),
