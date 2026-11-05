@@ -261,6 +261,7 @@ class QuickCheckoutSerializer(serializers.Serializer):
     # серверу — продажа идёт в смену этой кассы, открытую в это время, иначе в техническую смену дня.
     sold_at = serializers.DateTimeField(required=False, allow_null=True)
     cashbox = serializers.UUIDField(required=False, allow_null=True)
+    branch = serializers.UUIDField(required=False, allow_null=True)  # ТЗ кассы 05.11 п.14: если у смены/кассы филиала нет
     # Удалённые строки корзины (веб-касса) — пишутся в CartItemDeletionLog (apps.possync.deletions)
     deleted_items = serializers.ListField(child=serializers.DictField(), required=False, allow_empty=True, max_length=500)
     # График долга (веб-касса): создаётся вместе со сделкой (apps.possync.schedule)
@@ -571,6 +572,8 @@ class PosQuickCheckoutAPIView(APIView):
         })
         ser.is_valid(raise_exception=True)
         data = ser.validated_data
+        if data.get("branch"):
+            self._body_branch(company, data)  # 05.11 п.14: неверный филиал — 400 до продажи
         user = request.user
         # ТЗ Н-15: офлайн-досылка (offline + sold_at): цены кассы, остаток в минус, вариант не обязателен
         self._offline = bool(data.get("offline") and data.get("offline_created_at"))
@@ -701,6 +704,12 @@ class PosQuickCheckoutAPIView(APIView):
                 e.detail["errors"] = [{"index": None, "code": str(code), "detail": str(e.detail.get("detail") or "")}]
             raise
 
+        # ТЗ кассы 05.11 п.14: у смены/кассы нет филиала (касса «Основная касса компании») — филиал из тела
+        if sale.branch_id is None and ser.validated_data.get("branch"):
+            b = self._body_branch(company, ser.validated_data)
+            Sale.objects.filter(pk=sale.pk).update(branch=b)
+            from apps.main.models import SaleItem
+            SaleItem.objects.filter(sale_id=sale.pk, branch__isnull=True).update(branch=b)
         sale.refresh_from_db()
         body = _quick_result(sale)
         for k in ("cashflows", "receipt_print_path", "ekassa", "payments"):
@@ -1024,6 +1033,16 @@ class PosQuickCheckoutAPIView(APIView):
             ))
         CartItem.objects.bulk_create(self._merge_duplicate_rows(rows, items))
         cart.recalc()
+
+    def _body_branch(self, company, data):
+        """ТЗ кассы 05.11 п.14: филиал из тела чека — только если у смены и её кассы филиала нет."""
+        bid = data.get("branch")
+        if not bid:
+            return None
+        b = Branch.objects.filter(pk=bid, company=company).first()
+        if b is None:
+            raise ValidationError({"branch": "Филиал не найден.", "code": "branch_not_found"})
+        return b
 
     def _merge_duplicate_rows(self, rows, items):
         """

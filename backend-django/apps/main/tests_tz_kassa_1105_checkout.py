@@ -40,3 +40,18 @@ class WeightLines1105Tests(CheckoutBase):
                      {"product": str(p.id), "qty": "0.100", "price": "70.00", "price_override": True}])
         self.assertEqual(r.status_code, 400, getattr(r, "data", None))
         self.assertEqual(r.data["code"], "duplicate_line")
+
+    def test_branch_and_device_from_body(self):
+        from apps.main.models import Sale
+        from apps.users.models import Branch
+        self.cashbox.branch = None
+        self.cashbox.save()
+        self.open_shift()
+        b = Branch.objects.create(company=self.company, name="Филиал 1")
+        p = self.mk(1)[0]
+        r = self.co([{"product": str(p.id), "qty": "1", "price": "10.00"}], branch=str(b.id),
+                    device_key="kassa-pc-0001", device_name="Касса 1")
+        self.assertEqual(r.status_code, 201, getattr(r, "data", None))
+        s = Sale.objects.get(pk=r.data["id"])
+        self.assertEqual(s.branch_id, b.id)
+        self.assertEqual((s.source, s.device_key, s.device_name), ("pos", "kassa-pc-0001", "Касса 1"))

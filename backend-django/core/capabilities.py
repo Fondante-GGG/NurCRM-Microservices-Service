@@ -70,7 +70,8 @@ FEATURES = (
     "receipt_delete",  # п.6: DELETE suppliers/receipts/{id}/ {reason} + Idempotency-Key
     "receipt_version_required",
     "rental_idempotency",
-    "products_archived_filter",  # п.13: products/list/?is_archived=true (или status=archived) — только архив  # п.8: POST rentals/ — Idempotency-Key, replayed  # п.7: PATCH/DELETE прихода с кассы без If-Match/version — 428 version_required
+    "products_archived_filter",
+    "checkout_branch",  # п.14: pos/checkout/ {branch} — филиал чека, если у смены/кассы его нет  # п.13: products/list/?is_archived=true (или status=archived) — только архив  # п.8: POST rentals/ — Idempotency-Key, replayed  # п.7: PATCH/DELETE прихода с кассы без If-Match/version — 428 version_required
 )
 
 
