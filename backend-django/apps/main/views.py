@@ -983,7 +983,8 @@ class PipelineListCreateAPIView(CompanyBranchRestrictedMixin, generics.ListCreat
     queryset = Pipeline.objects.select_related("company", "branch", "owner").all()
     filter_backends = [filters.SearchFilter, DjangoFilterBackend]
     search_fields = ["name"]
-    filterset_fields = "__all__"
+    # ТЗ кассы 05.11 п.19: "__all__" включал JSONField stages — django-filter падал, GET отвечал 500
+    filterset_fields = ["branch", "owner", "name", "created_at", "updated_at"]
 
     def perform_create(self, serializer):
         self._save_with_company_branch(serializer, owner=self.request.user)
@@ -1033,7 +1034,7 @@ class IntegrationListCreateAPIView(CompanyBranchRestrictedMixin, generics.ListCr
     serializer_class = IntegrationSerializer
     queryset = Integration.objects.all()
     filter_backends = [DjangoFilterBackend]
-    filterset_fields = "__all__"
+    filterset_fields = ["branch", "type", "status", "created_at", "updated_at"]  # 05.11: JSONField config давал 500
 
 
 class IntegrationRetrieveUpdateDestroyAPIView(CompanyBranchRestrictedMixin, generics.RetrieveUpdateDestroyAPIView):
@@ -1045,7 +1046,7 @@ class AnalyticsListAPIView(CompanyBranchRestrictedMixin, generics.ListAPIView):
     serializer_class = AnalyticsSerializer
     queryset = Analytics.objects.all()
     filter_backends = [DjangoFilterBackend]
-    filterset_fields = "__all__"
+    filterset_fields = ["branch", "type", "created_at"]  # 05.11: "__all__" с JSONField data давал 500
 
 
 # ===========================
