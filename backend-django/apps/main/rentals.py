@@ -329,6 +329,13 @@ class RentalListCreateAPIView(APIView):
         return paginator.get_paginated_response(rows)
 
     def post(self, request):
+        # ТЗ кассы 05.11 п.8: повтор после обрыва связи с тем же Idempotency-Key (или idempotency_key
+        # в теле) не создаёт второй прокат — прежний ответ с replayed: true
+        from apps.integrations.idempotency import idempotent
+
+        return idempotent(body_key=True, replay_flag=True)(type(self)._post_impl)(self, request)
+
+    def _post_impl(self, request):
         company = _company(request)
         ser = RentalCreateSerializer(data=request.data)
         ser.is_valid(raise_exception=True)
@@ -392,7 +399,7 @@ class RentalListCreateAPIView(APIView):
             except IntegrityError:
                 if attempt == 2:
                     raise
-        return Response(_payload(rental, request.user), status=status.HTTP_201_CREATED)
+        return Response({**_payload(rental, request.user), "replayed": False}, status=status.HTTP_201_CREATED)
 
 
 class RentalDetailAPIView(APIView):

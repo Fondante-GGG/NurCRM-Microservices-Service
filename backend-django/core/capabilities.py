@@ -68,7 +68,8 @@ FEATURES = (
     "checkout_lines_merged",  # п.4: одинаковые строки складываются (warnings lines_merged), разные — 400 duplicate_line
     "weight_line_total_floor",  # п.5: line_total весовой строки вниз, как subtotal
     "receipt_delete",  # п.6: DELETE suppliers/receipts/{id}/ {reason} + Idempotency-Key
-    "receipt_version_required",  # п.7: PATCH/DELETE прихода с кассы без If-Match/version — 428 version_required
+    "receipt_version_required",
+    "rental_idempotency",  # п.8: POST rentals/ — Idempotency-Key, replayed  # п.7: PATCH/DELETE прихода с кассы без If-Match/version — 428 version_required
 )
 
 
