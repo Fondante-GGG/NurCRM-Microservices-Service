@@ -224,9 +224,17 @@ def _offset_supplier_debt(company, supplier, sup_return, amount):
     """
     Возврат поставщику «списанием долга» (31.10): сначала долг сделок тех приходов, из которых возврат
     (метка [receipt:<id>]), потом остальные открытые долги поставщика — от старых к новым.
-    Списываем не больше остатка каждой сделки (prepayment += часть). Возвращает списанную сумму.
+    Списываем не больше остатка каждой сделки. Возвращает списанную сумму.
+
+    ТЗ кассы 05.11 п.1: долг уменьшается через сумму сделки (amount −= часть, график — с последних
+    взносов), а не через prepayment: prepayment поставщика в suppliers/payables/ — это переплата,
+    и «зачёт» показывал её как новую переплату. Если возврат привязан к приходу, трогаем только
+    сделки этих приходов: у прихода без сделки (оформлен без create_deal) долг не в payables,
+    и раньше зачёт уходил на чужой, самый старый долг поставщика. Такой долг уменьшается в
+    _receipt_payment_info (вычитаются возвраты debt_offset по приходу).
     """
     import logging
+    from apps.main.receipt_edit import _apply_deal_diff
 
     receipt_ids = {str(sup_return.receipt_id)} if sup_return.receipt_id else set()
     receipt_ids |= {
@@ -238,21 +246,48 @@ def _offset_supplier_debt(company, supplier, sup_return, amount):
         .order_by("created_at")
     )
     tagged = [d for d in deals if any(_receipt_marker(r) in (d.note or "") for r in receipt_ids)]
-    ordered = tagged + [d for d in deals if d not in tagged]
+    others = [d for d in deals if d not in tagged]
     # сумма возврата считается с 3 знаками (цена × кол-во), долг хранится в копейках: без округления
     # сохранение падало, а старый код глотал ошибку — долг не уменьшался
     total = Decimal(str(amount)).quantize(Decimal("0.01"))
     left = total
-    for deal in ordered:
-        if left <= 0:
-            break
-        rem = deal.remaining_debt
-        if rem <= 0:
-            continue
-        take = min(left, rem)
-        deal.prepayment = (deal.prepayment or Decimal("0")) + take
-        deal.save(update_fields=["prepayment", "updated_at"])
-        left -= take
+
+    def _take_from(deal_list):
+        nonlocal left
+        for deal in deal_list:
+            if left <= 0:
+                break
+            rem = deal.remaining_debt
+            if rem <= 0:
+                continue
+            take = min(left, rem)
+            _apply_deal_diff(deal, -take)
+            left -= take
+
+    _take_from(tagged)
+    # 05.11 п.1: приход «в долг» без сделки — сначала гасится его собственный долг (виден в
+    # _receipt_payment_info), и только излишек идёт на другие долги поставщика (правило 31.10).
+    tagged_rids = {r for r in receipt_ids if any(_receipt_marker(r) in (d.note or "") for d in tagged)}
+    untagged = [r for r in receipt_ids if r not in tagged_rids]
+    if left > 0 and untagged:
+        for rcpt in SupplierReceipt.objects.filter(id__in=untagged).prefetch_related("items"):
+            if left <= 0:
+                break
+            info = _receipt_payment_info([rcpt]).get(str(rcpt.id)) or {}
+            if info.get("payment_type") != "debt" or info.get("deal_id"):
+                continue
+            own_now = sum(
+                (Decimal(str(q)) * Decimal(str(p)) for q, p in SupplierReturnItem.objects.filter(
+                    supplier_return=sup_return, receipt_item__receipt_id=rcpt.id
+                ).values_list("qty", "purchase_price")),
+                Decimal("0"),
+            ).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+            # долг до этого возврата = остаток после него + то, что погасил этот возврат (без перебора)
+            before = Decimal(info.get("debt_amount") or "0") + own_now
+            gross = sum((receipt_item_amount(it) for it in rcpt.items.all()), Decimal("0")).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+            before = min(before, gross)
+            left -= min(left, before)
+    _take_from(others)
     if left > 0:
         logging.getLogger(__name__).warning(
             "supplier return %s: debt offset left %s not applied (no open debt)", sup_return.pk, left
@@ -315,6 +350,15 @@ def _receipt_payment_info(receipts):
             if _receipt_marker(i) in (d.note or "") and i not in deals:
                 deals[i] = d
 
+    # ТЗ кассы 05.11 п.1: у прихода без сделки долг — вся сумма; возвраты debt_offset его уменьшают
+    offsets = {}
+    for rid_, q_, p_ in SupplierReturnItem.objects.filter(
+        receipt_item__receipt_id__in=ids,
+        supplier_return__compensation=SupplierReturn.Compensation.DEBT_OFFSET,
+        supplier_return__status=SupplierReturn.Status.POSTED,
+    ).values_list("receipt_item__receipt_id", "qty", "purchase_price"):
+        offsets[str(rid_)] = offsets.get(str(rid_), Decimal("0")) + Decimal(str(q_)) * Decimal(str(p_))
+
     lo = min(r.created_at for r in receipts)
     hi = max(r.created_at for r in receipts) + timedelta(seconds=60)
     sup_ids = {r.supplier_id for r in receipts}
@@ -355,7 +399,8 @@ def _receipt_payment_info(receipts):
         if ptype in ("cash", "transfer"):
             paid, debt_amount = total, Decimal("0.00")
         elif ptype == "debt" and debt_amount is None:
-            paid, debt_amount = Decimal("0.00"), total
+            off = offsets.get(rid, Decimal("0")).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+            paid, debt_amount = Decimal("0.00"), max(Decimal("0.00"), total - off)
         elif ptype == "prepayment":
             paid = paid_cf if cfs else None
             if debt_amount is None and paid is not None:

@@ -71,3 +71,44 @@ class SupplierReturnDebtOffsetTests(TestCase):
         self.assertEqual(r2.status_code, 201)
         self.assertTrue(r2.data.get("replayed"))
         self.assertEqual(SupplierReturn.objects.filter(company=self.company).count(), 1)
+
+
+class SupplierReturnDebtOffset1105Tests(SupplierReturnDebtOffsetTests):
+    """ТЗ кассы 05.11 п.1: зачёт не создаёт переплату и не уходит на чужой долг."""
+
+    def payables_row(self):
+        r = self.api.get("/api/main/suppliers/payables/")
+        self.assertEqual(r.status_code, 200, r.data)
+        rows = [x for x in r.data["items"] if x["supplier_id"] == str(self.sup.id)]
+        return rows[0] if rows else None
+
+    def test_offset_no_overpayment(self):
+        rid, d = self.receipt(10)  # долг 100
+        self.ret(rid, 3)
+        d.refresh_from_db()
+        self.assertEqual(d.remaining_debt, Decimal("70.00"))
+        self.assertEqual(d.prepayment, Decimal("0.00"))
+        row = self.payables_row()
+        self.assertEqual(Decimal(row["debt"]), Decimal("70.00"))
+        self.assertEqual(Decimal(row["prepayment_total"]), Decimal("0.00"))
+        from apps.main.models import SupplierReceipt
+        from apps.main.views import _receipt_payment_info
+        info = _receipt_payment_info([SupplierReceipt.objects.get(pk=rid)])[str(rid)]
+        self.assertEqual(Decimal(info["debt_amount"]), Decimal("70.00"))
+
+    def test_receipt_without_deal_offsets_itself(self):
+        rid_old, d_old = self.receipt(10)  # старый долг со сделкой 100
+        r = self.api.post(f"/api/main/suppliers/{self.sup.id}/receipt/", {
+            "items": [{"product": str(self.p.id), "qty": 1, "purchase_price": "10.00"}],
+            "payment_type": "debt"}, format="json")  # без create_deal — сделки нет
+        self.assertIn(r.status_code, (200, 201), r.data)
+        rid = r.data.get("receipt_id") or r.data.get("id")
+        self.ret(rid, 1)
+        d_old.refresh_from_db()
+        self.assertEqual(d_old.remaining_debt, Decimal("100.00"))
+        self.assertEqual(d_old.prepayment, Decimal("0.00"))
+        from apps.main.models import SupplierReceipt
+        from apps.main.views import _receipt_payment_info
+        info = _receipt_payment_info([SupplierReceipt.objects.get(pk=rid)])[str(rid)]
+        self.assertEqual(info["payment_type"], "debt")
+        self.assertEqual(Decimal(info["debt_amount"]), Decimal("0.00"))
