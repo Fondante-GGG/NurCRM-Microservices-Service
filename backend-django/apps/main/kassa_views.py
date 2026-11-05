@@ -990,6 +990,17 @@ class PosQuickCheckoutAPIView(APIView):
                         f"Цена продажи не может быть ниже закупочной ({min_price}).",
                         min_price=str(min_price), price=str(price),
                     )
+            if offline and discount <= 0 and not (is_wholesale and wholesale_price > 0 and price == wholesale_price):
+                # ТЗ кассы 05.11 п.15: досылка из очереди ниже закупки проводится, но с предупреждением
+                min_price = _q2(Decimal(str(getattr(product, "purchase_price", None) or 0)))
+                if pkg:
+                    ipp = Decimal(str(pkg.quantity_in_package or 0))
+                    min_price = _q2(min_price / ipp) if ipp > 0 else min_price
+                if unit is not None:
+                    min_price = _q2(min_price * unit.factor)
+                if price < min_price:
+                    self._warnings.append({"code": "below_cost", "index": idx, "product_id": str(product.id),
+                                           "price": str(price), "purchase_price": str(min_price)})
             if offline and product.kind != Product.Kind.SERVICE:
                 try:
                     units = line_qty_consume_units(qty, pkg)

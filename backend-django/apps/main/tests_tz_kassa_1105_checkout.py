@@ -55,3 +55,15 @@ class WeightLines1105Tests(CheckoutBase):
         s = Sale.objects.get(pk=r.data["id"])
         self.assertEqual(s.branch_id, b.id)
         self.assertEqual((s.source, s.device_key, s.device_name), ("pos", "kassa-pc-0001", "Касса 1"))
+
+    def test_offline_below_cost_warning(self):
+        from datetime import timedelta
+        from django.utils import timezone
+        self.open_shift()
+        p = self.mk(1, purchase_price=Decimal("8.00"))[0]
+        r = self.co([{"product": str(p.id), "qty": "1", "price": "5.00"}], offline=True,
+                    sold_at=(timezone.now() - timedelta(hours=1)).isoformat())
+        self.assertEqual(r.status_code, 201, getattr(r, "data", None))
+        w = [x for x in r.data.get("warnings") or [] if x["code"] == "below_cost"]
+        self.assertEqual(len(w), 1)
+        self.assertEqual(w[0]["purchase_price"], "8.00")
