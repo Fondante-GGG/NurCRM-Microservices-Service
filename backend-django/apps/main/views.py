@@ -209,11 +209,19 @@ def _receipt_marker(receipt_id):
     return f"[receipt:{receipt_id}]"
 
 
+def _receipt_tag(receipt_id):
+    """
+    05.11: признак связи сделка ↔ приход для ПОИСКА. Сервер пишет «[receipt:<id>]», касса — «receipt:<id> · …»
+    (без скобок); ищем по общей части, чтобы видеть и сделки, созданные кассой.
+    """
+    return f"receipt:{receipt_id}"
+
+
 def _find_receipt_deal(company, supplier_id, receipt_id):
     """Сделка поставщика, созданная по приходу (по метке в note), или None."""
     return (
         ClientDeal.objects.filter(
-            company=company, client_id=supplier_id, note__contains=_receipt_marker(receipt_id)
+            company=company, client_id=supplier_id, note__contains=_receipt_tag(receipt_id)
         )
         .order_by("created_at")
         .first()
@@ -245,7 +253,7 @@ def _offset_supplier_debt(company, supplier, sup_return, amount):
         .filter(company=company, client=supplier, kind=ClientDeal.Kind.DEBT)
         .order_by("created_at")
     )
-    tagged = [d for d in deals if any(_receipt_marker(r) in (d.note or "") for r in receipt_ids)]
+    tagged = [d for d in deals if any(_receipt_tag(r) in (d.note or "") for r in receipt_ids)]
     others = [d for d in deals if d not in tagged]
     # сумма возврата считается с 3 знаками (цена × кол-во), долг хранится в копейках: без округления
     # сохранение падало, а старый код глотал ошибку — долг не уменьшался
@@ -267,7 +275,7 @@ def _offset_supplier_debt(company, supplier, sup_return, amount):
     _take_from(tagged)
     # 05.11 п.1: приход «в долг» без сделки — сначала гасится его собственный долг (виден в
     # _receipt_payment_info), и только излишек идёт на другие долги поставщика (правило 31.10).
-    tagged_rids = {r for r in receipt_ids if any(_receipt_marker(r) in (d.note or "") for d in tagged)}
+    tagged_rids = {r for r in receipt_ids if any(_receipt_tag(r) in (d.note or "") for d in tagged)}
     untagged = [r for r in receipt_ids if r not in tagged_rids]
     if left > 0 and untagged:
         for rcpt in SupplierReceipt.objects.filter(id__in=untagged).prefetch_related("items"):
@@ -343,11 +351,11 @@ def _receipt_payment_info(receipts):
 
     deal_q = Q()
     for i in ids:
-        deal_q |= Q(note__contains=_receipt_marker(i))
+        deal_q |= Q(note__contains=_receipt_tag(i))
     deals = {}
     for d in ClientDeal.objects.filter(deal_q).prefetch_related("installments"):
         for i in ids:
-            if _receipt_marker(i) in (d.note or "") and i not in deals:
+            if _receipt_tag(i) in (d.note or "") and i not in deals:
                 deals[i] = d
 
     # ТЗ кассы 05.11 п.1: у прихода без сделки долг — вся сумма; возвраты debt_offset его уменьшают

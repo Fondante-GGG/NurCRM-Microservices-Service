@@ -112,3 +112,21 @@ class SupplierReturnDebtOffset1105Tests(SupplierReturnDebtOffsetTests):
         info = _receipt_payment_info([SupplierReceipt.objects.get(pk=rid)])[str(rid)]
         self.assertEqual(info["payment_type"], "debt")
         self.assertEqual(Decimal(info["debt_amount"]), Decimal("0.00"))
+
+
+class SupplierReturnKassaDeal1105Tests(SupplierReturnDebtOffsetTests):
+    """05.11: сделка, созданная кассой (метка «receipt:<id> · …» без скобок), тоже уменьшается."""
+
+    def test_kassa_style_deal(self):
+        from datetime import date
+        r = self.api.post(f"/api/main/suppliers/{self.sup.id}/receipt/", {
+            "items": [{"product": str(self.p.id), "qty": 10, "purchase_price": "10.00"}],
+            "payment_type": "debt"}, format="json")
+        rid = r.data.get("receipt_id") or r.data.get("id")
+        d = ClientDeal.objects.create(company=self.company, client=self.sup, kind=ClientDeal.Kind.DEBT,
+                                      title="Долг", amount=Decimal("100.00"), debt_months=1, first_due_date=date.today(),
+                                      note=f"receipt:{rid} · приход 05.11.2026 16:48, срок 30 дн. · NurCRM")
+        self.ret(rid, 3)
+        d.refresh_from_db()
+        self.assertEqual(d.remaining_debt, Decimal("70.00"))
+        self.assertEqual(d.prepayment, Decimal("0.00"))

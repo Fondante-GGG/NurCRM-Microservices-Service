@@ -71,14 +71,14 @@ class Command(BaseCommand):
                 deals = (
                     ClientDeal.objects.select_for_update()
                     .filter(company_id=company_id, client_id=supplier_id, kind=ClientDeal.Kind.DEBT,
-                            prepayment__gt=0, note__contains="[receipt:")
+                            prepayment__gt=0, note__contains="receipt:")
                     .order_by("created_at")
                 )
                 for deal in deals:
                     if left <= 0:
                         break
                     x = min(deal.prepayment, left)
-                    own = any(f"[receipt:{rid}]" in (deal.note or "") for rid in s["receipts"])
+                    own = any(f"receipt:{rid}" in (deal.note or "") for rid in s["receipts"])
                     action = (
                         f"amount {deal.amount}→{deal.amount - x}, prepayment {deal.prepayment}→{deal.prepayment - x}"
                         if own else f"prepayment {deal.prepayment}→{deal.prepayment - x} (чужой долг вернуть)"
