@@ -38,6 +38,7 @@ CONSTRUCTOR_FEATURES = (
     "double-warehouse",
     "online-showcase",
     "barcode-print",
+    "language",  # ТЗ кассы 05.11 п.11: языковой пакет кассы/мобилки (en/tr/uz)
 )
 MAX_EMPLOYEES_LIMIT = 1000
 _NOTE_MAX = re.compile(r"max_employees=(\d+)")
