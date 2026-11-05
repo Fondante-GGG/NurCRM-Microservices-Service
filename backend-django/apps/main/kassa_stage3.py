@@ -104,6 +104,9 @@ def _checkout_payload(payment, total, prepaid=ZERO):
 # Размеры и цвета
 # ======================================================================
 
+from apps.users.permissions import read_only_guard  # noqa: E402
+
+
 class ProductVariantSerializer(serializers.ModelSerializer):
     # ТЗ Н-27: сколько штук варианта сейчас в резерве заказов витрины (уже списаны с quantity)
     reserved = serializers.SerializerMethodField()
@@ -158,6 +161,7 @@ def _company_product(request, pk):
     return get_object_or_404(Product, pk=pk, company=_company(request))
 
 
+@read_only_guard("can_edit_products")  # ТЗ кассы 05.11 п.12
 class ProductVariantListCreateAPIView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
@@ -185,6 +189,7 @@ class ProductVariantListCreateAPIView(APIView):
         return Response(ProductVariantSerializer(v).data, status=status.HTTP_201_CREATED)
 
 
+@read_only_guard("can_edit_products")  # ТЗ кассы 05.11 п.12
 class ProductVariantDetailAPIView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 

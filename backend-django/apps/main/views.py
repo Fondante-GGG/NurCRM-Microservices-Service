@@ -8031,6 +8031,7 @@ def _fmt_qty(value) -> str:
     return format(d, "f")
 
 
+@read_only_guard("can_edit_products")  # ТЗ кассы 05.11 п.12
 class ProductMoveToRawAPIView(CompanyBranchRestrictedMixin, APIView):
     """
     POST /api/main/products/<uuid:product_id>/move-to-raw/
@@ -9278,6 +9279,7 @@ class OwnerAgentsProductsListAPIView(APIView, CompanyBranchRestrictedMixin):
 # ===========================
 #  Product images
 # ===========================
+@read_only_guard("can_edit_products")  # ТЗ кассы 05.11 п.12
 class ProductImageListCreateAPIView(CompanyBranchRestrictedMixin, generics.ListCreateAPIView):
     """
     GET  /api/main/products/<uuid:product_id>/images/
@@ -9330,6 +9332,7 @@ class ProductImageListCreateAPIView(CompanyBranchRestrictedMixin, generics.ListC
         obj = serializer.save(product=product)
 
 
+@read_only_guard("can_edit_products")  # ТЗ кассы 05.11 п.12
 class ProductImageRetrieveUpdateDestroyAPIView(
     CompanyBranchRestrictedMixin,
     generics.RetrieveUpdateDestroyAPIView
