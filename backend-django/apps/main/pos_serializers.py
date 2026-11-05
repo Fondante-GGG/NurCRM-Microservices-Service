@@ -197,9 +197,8 @@ class SaleItemSerializer(serializers.ModelSerializer):
         return obj.discount_source == "promotion" and (obj.manual_discount or 0) > 0
 
     def get_line_total(self, obj):
-        base = Decimal(str(obj.unit_price or 0)) * Decimal(str(obj.quantity or 0))
-        disc = Decimal(str(getattr(obj, "line_discount", None) or 0))
-        return money(base - disc)
+        from apps.main.models import line_total_like_check  # ТЗ кассы 05.11 п.5
+        return line_total_like_check(obj)
 
     def get_promotion_rules(self, obj):
         p = getattr(obj, "product", None)
@@ -1275,9 +1274,8 @@ class SaleItemReadSerializer(serializers.ModelSerializer):
         return obj.discount_source == "promotion" and (obj.manual_discount or 0) > 0
 
     def get_line_total(self, obj):
-        base = (obj.unit_price or Decimal("0")) * Decimal(obj.quantity or 0)
-        disc = Decimal(str(getattr(obj, "line_discount", None) or 0))
-        return money(base - disc)
+        from apps.main.models import line_total_like_check  # ТЗ кассы 05.11 п.5
+        return line_total_like_check(obj)
 
     def get_returnable_qty(self, obj):
         """

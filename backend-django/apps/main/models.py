@@ -1922,6 +1922,22 @@ def scale_amount_step(company) -> Decimal:
     return Decimal("1") if unit == SCALE_BARCODE_AMOUNT_UNIT_SOM else Decimal("0.01")
 
 
+def line_total_like_check(item) -> Decimal:
+    """
+    ТЗ кассы 05.11 п.5: сумма строки (после скидки строки) по тому же правилу, что subtotal/total:
+    весовая строка — вниз до шага весов компании (cart_line_base), остальные — HALF_UP до копейки.
+    """
+    disc = Decimal(str(getattr(item, "line_discount", None) or 0))
+    raw = Decimal(str(item.unit_price or 0)) * Decimal(str(item.quantity or 0))
+    # целая сумма не меняется ни одним правилом — без запросов к товару и компании
+    if raw == raw.to_integral_value() or getattr(item, "product_id", None) is None:
+        return (raw - disc).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    if not getattr(item.product, "is_weight", False):
+        return (raw - disc).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    base = cart_line_base(item, scale_amount_step(item.company))
+    return (base - disc).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
+
 def cart_line_base(item, amount_step: Decimal) -> Decimal:
     """
     Сумма строки корзины/чека — так же, как её считают весы.
@@ -3282,9 +3298,8 @@ class SaleItem(models.Model):
 
     @property
     def line_total(self) -> Decimal:
-        base = Decimal(self.unit_price or 0) * Decimal(self.quantity or 0)
-        disc = Decimal(getattr(self, "line_discount", None) or 0)
-        return (base - disc).quantize(_Q2, rounding=ROUND_HALF_UP)  # ТЗ 01.11: 0.005 -> 0.01, не банковское
+        # ТЗ 01.11: 0.005 -> 0.01, не банковское; 05.11 п.5: весовая — вниз, как subtotal
+        return line_total_like_check(self)
 
     @property
     def amount(self) -> Decimal:

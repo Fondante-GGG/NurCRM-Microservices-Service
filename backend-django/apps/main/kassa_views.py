@@ -335,8 +335,10 @@ def _quick_result(sale: Sale) -> dict:
 
 def _quick_item(it) -> dict:
     """Расшифровка цены строки (BE2-07): касса сверяет итог со своим."""
-    base = money((it.unit_price or ZERO) * (it.quantity or ZERO))
+    from apps.main.models import line_total_like_check
+
     discount = money(it.line_discount or ZERO)
+    base = line_total_like_check(it) + discount  # ТЗ кассы 05.11 п.5: весовая строка — вниз, как subtotal
     return {
         "id": str(it.id),
         "product": str(it.product_id) if it.product_id else None,
@@ -714,6 +716,11 @@ class PosQuickCheckoutAPIView(APIView):
                     it["variant_missing"] = True
             if self._warnings:
                 body["warnings"] = self._warnings
+        else:
+            # ТЗ кассы 05.11 п.4/п.15: предупреждения и для обычной продажи (склейка строк и т.п.)
+            online_w = [w for w in self._warnings if w.get("code") in ("lines_merged", "below_cost")]
+            if online_w:
+                body["warnings"] = online_w
         # Б-03: расхождения цен строк с каталогом — в ответ и в журнал продажи.
         mismatch = list(getattr(self, "_price_mismatch", None) or [])
         body["price_mismatch"] = mismatch
@@ -1015,8 +1022,44 @@ class PosQuickCheckoutAPIView(APIView):
                 price_manually_edited=price != default_price, is_wholesale=is_wholesale,
                 sale_unit=unit, base_quantity=(qty3(qty * unit.factor) if unit is not None else None),
             ))
-        CartItem.objects.bulk_create(rows)
+        CartItem.objects.bulk_create(self._merge_duplicate_rows(rows, items))
         cart.recalc()
+
+    def _merge_duplicate_rows(self, rows, items):
+        """
+        ТЗ кассы 05.11 п.4: в корзине одна строка на товар (+упаковка/вариант) — так требует база.
+        Одинаковые строки (та же цена, единица, опт, исполнитель) складываются в одну, в ответе
+        warnings [{code: "lines_merged", index, into}]; разные — 400 duplicate_line (раньше 500).
+        """
+        out, seen = [], {}
+        for idx, row in enumerate(rows):
+            if row.product_id is None:
+                out.append(row)
+                continue
+            key = (row.product_id, row.sale_package_id, row.variant_id)
+            first = seen.get(key)
+            if first is None:
+                seen[key] = (idx, row)
+                out.append(row)
+                continue
+            fidx, frow = first
+            same = (
+                frow.unit_price == row.unit_price and frow.sale_unit_id == row.sale_unit_id
+                and frow.is_wholesale == row.is_wholesale and frow.performer_id == row.performer_id
+            )
+            if not same:
+                raise _line_error(
+                    "duplicate_line", idx,
+                    "Товар уже есть в чеке другой строкой с другой ценой/единицей — объедините строки.",
+                    duplicate_of=fidx,
+                )
+            frow.quantity = qty3(frow.quantity + row.quantity)
+            frow.line_discount = money((frow.line_discount or ZERO) + (row.line_discount or ZERO))
+            frow.manual_discount = money((frow.manual_discount or ZERO) + (row.manual_discount or ZERO))
+            if frow.base_quantity is not None and row.base_quantity is not None:
+                frow.base_quantity = qty3(frow.base_quantity + row.base_quantity)
+            self._warnings.append({"code": "lines_merged", "index": idx, "into": fidx})
+        return out
 
     def _apply_order_discount(self, cart, data, bonus, limit_discounts, max_dp):
         from apps.main.pos_views import _cart_line_discounts_total, _order_discount_over_limit
