@@ -77,6 +77,27 @@ class IdempotencyLookupAPIView(APIView):
                 created_at=cf.created_at, created_by=_user_ref(getattr(cf, "cashier", None)),
                 response={"id": str(cf.id), "type": cf.type, "amount": str(cf.amount), "status": cf.status},
             ))
+        # ТЗ кассы 05.11 п.17: бонусы клиента (clients/{id}/bonus/) хранят ключ в своей проводке
+        from apps.main.models import ClientBonusTransaction
+
+        btx = ClientBonusTransaction.objects.filter(company_id=company_id, idempotency_key=key).first()
+        if btx is not None:
+            from apps.main.kassa_views import _bonus_tx_payload
+
+            return Response(_found(
+                key, state="done", endpoint=f"POST main/clients/{btx.client_id}/bonus/", status_code=201,
+                created_at=getattr(btx, "created_at", None), created_by=_user_ref(getattr(btx, "user", None)),
+                response={"bonus_balance": str(btx.balance_after), "transaction": _bonus_tx_payload(btx)},
+            ))
+        from apps.main.models import BranchTransfer
+
+        bt = BranchTransfer.objects.filter(company_id=company_id, idempotency_key=key).select_related("created_by").first()
+        if bt is not None:
+            return Response(_found(
+                key, state="done", endpoint="POST main/branch-transfers/", status_code=201,
+                created_at=bt.created_at, created_by=_user_ref(bt.created_by),
+                response={"id": str(bt.id), "status": getattr(bt, "status", None)},
+            ))
         try:  # у оплат сделок ключ — UUID
             dp = DealPayment.objects.filter(company_id=company_id, idempotency_key=key).select_related("created_by").first()
         except (ValueError, ValidationError):

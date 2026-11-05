@@ -72,7 +72,8 @@ FEATURES = (
     "rental_idempotency",
     "products_archived_filter",
     "checkout_branch",
-    "checkout_below_cost_warning",  # п.15: досылка ниже закупки — 201 + warnings [{code: below_cost, index, product_id, purchase_price}]  # п.14: pos/checkout/ {branch} — филиал чека, если у смены/кассы его нет  # п.13: products/list/?is_archived=true (или status=archived) — только архив  # п.8: POST rentals/ — Idempotency-Key, replayed  # п.7: PATCH/DELETE прихода с кассы без If-Match/version — 428 version_required
+    "checkout_below_cost_warning",
+    "idempotency_lookup_bonus_transfers",  # п.17: idempotency/{key}/ находит бонусы и перемещения; branch-transfers replayed  # п.15: досылка ниже закупки — 201 + warnings [{code: below_cost, index, product_id, purchase_price}]  # п.14: pos/checkout/ {branch} — филиал чека, если у смены/кассы его нет  # п.13: products/list/?is_archived=true (или status=archived) — только архив  # п.8: POST rentals/ — Idempotency-Key, replayed  # п.7: PATCH/DELETE прихода с кассы без If-Match/version — 428 version_required
 )
 
 
