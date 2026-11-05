@@ -47,6 +47,7 @@ class PublicProductSerializer(serializers.ModelSerializer):
     brand_title = serializers.CharField(source="brand.name", read_only=True)
 
     image_url = serializers.SerializerMethodField()
+    image_thumb_url = serializers.SerializerMethodField()  # 05.11 п.28
     images = serializers.SerializerMethodField()
     final_price = serializers.SerializerMethodField()
     is_new = serializers.SerializerMethodField()
@@ -118,6 +119,7 @@ class PublicProductSerializer(serializers.ModelSerializer):
             "created_at",
 
             "image_url",
+            "image_thumb_url",
             "images",
             "characteristics",
             "packages",
@@ -165,6 +167,8 @@ class PublicProductSerializer(serializers.ModelSerializer):
                     "id": str(img.id),
                     "image": url,
                     "image_url": url,
+                    # ТЗ кассы 05.11 п.28: миниатюра для карточек (null — ещё не сделана, брать image_url)
+                    "image_thumb_url": self._thumb(img),
                     "alt": getattr(img, "alt", "") or "",
                     "is_primary": bool(getattr(img, "is_primary", False)),
                     "color": getattr(img, "color", "") or "",
@@ -172,6 +176,20 @@ class PublicProductSerializer(serializers.ModelSerializer):
                 }
             )
         return result
+
+    def _thumb(self, img):
+        t = getattr(img, "thumb", None)
+        if not t:
+            return None
+        request = self.context.get("request")
+        try:
+            return request.build_absolute_uri(t.url) if request else t.url
+        except ValueError:
+            return None
+
+    def get_image_thumb_url(self, obj: Product):
+        imgs = self._get_sorted_images(obj)
+        return self._thumb(imgs[0]) if imgs else None
 
     def get_image_url(self, obj: Product):
         sorted_imgs = self._get_sorted_images(obj)
