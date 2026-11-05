@@ -130,3 +130,27 @@ class SupplierReturnKassaDeal1105Tests(SupplierReturnDebtOffsetTests):
         d.refresh_from_db()
         self.assertEqual(d.remaining_debt, Decimal("70.00"))
         self.assertEqual(d.prepayment, Decimal("0.00"))
+
+
+class FixSupplierDebtOffsetCommandTests(SupplierReturnDebtOffsetTests):
+    def test_command_repairs_old_corruption(self):
+        from io import StringIO
+        from django.core.management import call_command
+        from apps.main.models import SupplierReturn, SupplierReturnItem
+        rid_old, d_old = self.receipt(10)   # чужой долг 100
+        rid, d = self.receipt(5)            # свой долг 50
+        item = SupplierReceiptItem.objects.get(receipt_id=rid)
+        r = SupplierReturn.objects.create(company=self.company, supplier=self.sup, receipt_id=rid,
+                                          compensation="debt_offset", number=1)
+        SupplierReturnItem.objects.create(supplier_return=r, product=self.p, receipt_item=item, qty=2,
+                                          purchase_price=Decimal("10.00"))
+        # старый код: 20 ушло в prepayment чужой сделки
+        d_old.prepayment = Decimal("20.00"); d_old.save()
+        call_command("fix_supplier_debt_offset", stdout=StringIO())  # dry-run
+        d_old.refresh_from_db(); self.assertEqual(d_old.prepayment, Decimal("20.00"))
+        call_command("fix_supplier_debt_offset", "--apply", stdout=StringIO())
+        d_old.refresh_from_db(); d.refresh_from_db()
+        self.assertEqual(d_old.prepayment, Decimal("0.00"))
+        self.assertEqual(d_old.remaining_debt, Decimal("100.00"))
+        self.assertEqual(d.remaining_debt, Decimal("30.00"))
+        self.assertEqual(d.prepayment, Decimal("0.00"))
