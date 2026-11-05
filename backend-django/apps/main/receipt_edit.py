@@ -470,7 +470,7 @@ def _edit(view, request, pk, body, action):
     user = request.user
     dry_run = body["dry_run"]
     qs = view._filter_qs_company_branch(SupplierReceipt.objects.all()).select_for_update()
-    receipt = get_object_or_404(qs, pk=pk)
+    receipt = get_object_or_404(qs.exclude(deleted_receipt_ids_q()), pk=pk)  # 05.11 п.6
     company = receipt.company
 
     # 1. право
@@ -495,6 +495,10 @@ def _edit(view, request, pk, body, action):
     body_version = _parse_version(body.get("version"))
     if if_match is None and body_version is not None and body_version != receipt.version:
         raise _version_conflict(receipt, status.HTTP_409_CONFLICT)
+    # ТЗ кассы 05.11 п.7: касса/программа владельца/мобилка без версии — 428 (сайт пока без требования)
+    if not dry_run and if_match is None and body_version is None and _version_required(request):
+        raise ApiError("version_required", "Передайте версию прихода (If-Match или version) — иначе можно затереть чужую правку.",
+                       status_code=428, data={"current_version": receipt.version})
 
     header = dict(body["header"])
     # 5. закрытый период склада (дата проведения, старая и новая дата накладной)
@@ -568,7 +572,7 @@ def _edit(view, request, pk, body, action):
 
     deleted = {str(p["item"].id) for p in plan if p["action"] == "delete"}
     added = [p for p in plan if p["action"] == "add"]
-    if plan and len(current) - len(deleted) + len(added) <= 0:
+    if action != "delete" and plan and len(current) - len(deleted) + len(added) <= 0:
         raise _validation({"lines": ["В приходе должна остаться хотя бы одна строка."]})
 
     product_ids = {p["product_id"] for p in plan}
@@ -1435,6 +1439,51 @@ def _with_idempotency(view, request, impl, *args):
     if not _request_key(request, True):
         raise ApiError("idempotency_key_required", "Нужен заголовок Idempotency-Key (uuid правки).", status_code=400)
     return idempotent(body_key=True, replay_flag=True)(impl)(view, request, *args)
+
+
+def _version_required(request):
+    from core.api_compat import parse_client
+
+    name = parse_client(request)[0]
+    return name is not None and name not in ("web", "site", "market", "front")
+
+
+def deleted_receipt_ids_q():
+    """ТЗ кассы 05.11 п.6: удалённый приход — с версией action=delete (строк нет, остатки откатаны)."""
+    from django.db.models import Exists, OuterRef
+
+    return Exists(SupplierReceiptVersion.objects.filter(receipt_id=OuterRef("pk"), action="delete"))
+
+
+def handle_delete(view, request, pk):
+    """
+    ТЗ кассы 05.11 п.6: DELETE suppliers/receipts/{id}/ {reason, version?} + Idempotency-Key.
+    Это правка «удалить все строки»: остатки и партии откатываются, оплата наличными возвращается
+    в кассу, долг по приходу уменьшается до нуля; версия action=delete + журнал действий.
+    Нельзя: товар уже продан/списан (negative_stock), был возврат поставщику (has_returns),
+    по долгу уже платили (debt_already_paid), окно правки/закрытый период — как у PATCH.
+    """
+    data = request.data if hasattr(request.data, "get") else {}
+    qs = view._filter_qs_company_branch(SupplierReceipt.objects.all())
+    receipt = get_object_or_404(qs.exclude(deleted_receipt_ids_q()), pk=pk)
+    raw = {
+        "reason": data.get("reason") or request.query_params.get("reason"),
+        "reason_code": data.get("reason_code") or "",
+        "version": data.get("version"),
+        "source": data.get("source") or "", "device": data.get("device") or "",
+        "dry_run": data.get("dry_run"),
+        "lines": [{"id": str(i), "delete": True} for i in receipt.items.values_list("id", flat=True)],
+    }
+    body = parse_body(raw, request.query_params)
+    if body["dry_run"]:
+        return edit_receipt(view, request, pk, body, action="delete")
+
+    def _impl(v, req, rid):
+        resp = edit_receipt(v, req, rid, body, action="delete")
+        resp.data["deleted"] = True
+        return resp
+
+    return _with_idempotency(view, request, _impl, pk)
 
 
 def handle_patch(view, request, pk):

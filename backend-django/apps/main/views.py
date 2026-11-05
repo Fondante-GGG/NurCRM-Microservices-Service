@@ -6751,6 +6751,9 @@ class SupplierReceiptQuerysetMixin:
             # so order explicitly: newest receipts first.
             .order_by("-created_at", "-id")
         )
+        from apps.main.receipt_edit import deleted_receipt_ids_q
+
+        qs = qs.exclude(deleted_receipt_ids_q())  # ТЗ кассы 05.11 п.6: удалённые приходы не показываем
         return self._filter_qs_company_branch(qs)
 
     def _supplier_receipts_filtered_queryset(self):
@@ -6910,6 +6913,11 @@ class SupplierReceiptRetrieveAPIView(
         from apps.main.receipt_edit import handle_patch
 
         return handle_patch(self, request, kwargs[self.lookup_url_kwarg])
+
+    def delete(self, request, *args, **kwargs):
+        from apps.main.receipt_edit import handle_delete  # ТЗ кассы 05.11 п.6
+
+        return handle_delete(self, request, kwargs[self.lookup_url_kwarg])
 
 
 def _aggregate_purchase_batches_total_amount(item_qs):

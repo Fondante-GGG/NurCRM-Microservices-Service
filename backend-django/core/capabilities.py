@@ -62,6 +62,13 @@ FEATURES = (
     "rentals_branch_filter",  # S5: rentals/?branch=<uuid>|main
     "ui_dark_style",  # S8: users/ui-preferences/ dark_style (soft|classic) = theme_dark_palette
     "bundle_component_id",  # G8: packages_input[].product_id у комплекта; в ответе packages[].product_id/product_name
+    # ТЗ кассы 05.11
+    "supplier_return_debt_offset_v2",  # п.1: debt_offset уменьшает долг прихода, без переплаты
+    "debt_return_drawer_cash",  # п.2: возврат чека в долг — выдача гашений наличными из ящика смены
+    "checkout_lines_merged",  # п.4: одинаковые строки складываются (warnings lines_merged), разные — 400 duplicate_line
+    "weight_line_total_floor",  # п.5: line_total весовой строки вниз, как subtotal
+    "receipt_delete",  # п.6: DELETE suppliers/receipts/{id}/ {reason} + Idempotency-Key
+    "receipt_version_required",  # п.7: PATCH/DELETE прихода с кассы без If-Match/version — 428 version_required
 )
 
 
